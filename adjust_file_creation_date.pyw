@@ -21,6 +21,7 @@ DEFAULT_SECTION = r'''adjust_file_creation_date:
     - .tif
     - .tiff
   change_files_in_place: true
+  overwrite: false
   hour_adjustment: 0
   patterns:
     - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:[ _-]+(?P<hour>\d{2})_(?P<minute>\d{2})_(?P<second>\d{2}))?'
@@ -150,11 +151,31 @@ def prepare_target_folder(change_files_in_place: bool, target_folder: Path) -> N
     target_folder.mkdir(parents=True, exist_ok=True)
 
 
-def prepare_destination(source_file: Path, *, change_files_in_place: bool, target_folder: Path) -> Path | None:
+def collision_safe_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+
+    counter = 1
+    while True:
+        candidate = path.with_name(f"{path.stem}_{counter}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def prepare_destination(
+    source_file: Path,
+    *,
+    change_files_in_place: bool,
+    target_folder: Path,
+    overwrite: bool,
+) -> Path | None:
     if change_files_in_place:
         return source_file
 
     destination = target_folder / source_file.name
+    if not overwrite:
+        destination = collision_safe_path(destination)
 
     try:
         shutil.copy2(source_file, destination)
@@ -228,6 +249,7 @@ def get_target_folder(script_config: dict, source_folder: Path, change_files_in_
 def adjust_file_creation_dates(script_config: dict) -> list[FileAdjustmentResult]:
     source_folder = Path(str(script_config["source_folder"]))
     change_files_in_place = bool(script_config.get("change_files_in_place", True))
+    overwrite = bool(script_config.get("overwrite", False))
     target_folder = get_target_folder(script_config, source_folder, change_files_in_place)
     extensions = get_file_extensions(script_config)
     patterns = get_patterns(script_config)
@@ -254,6 +276,7 @@ def adjust_file_creation_dates(script_config: dict) -> list[FileAdjustmentResult
                 source_file,
                 change_files_in_place=change_files_in_place,
                 target_folder=target_folder,
+                overwrite=overwrite,
             )
             if destination is None:
                 continue
