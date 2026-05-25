@@ -9,26 +9,27 @@ from typing import Any
 
 import yaml
 
-from winutils_python import connect_smb, visual
+from winutils_python import connect_smb, menu, visual
 
 
 DEFAULT_SECTION = r'''adjust_file_creation_date:
-  smb: false
-  source_folder: 'R:\path\to\files'
-  target_folder: 'C:\path\to\target'
-  extensions:
-    - .jpg
-    - .jpeg
-    - .png
-    - .gif
-    - .bmp
-    - .tif
-    - .tiff
-  change_files_in_place: true
-  overwrite: false
-  hour_adjustment: 0
-  patterns:
-    - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:[ _-]+(?P<hour>\d{2})_(?P<minute>\d{2})_(?P<second>\d{2}))?'
+  example_set:
+    smb: false
+    source_folder: 'R:\path\to\files'
+    target_folder: 'C:\path\to\target'
+    extensions:
+      - .jpg
+      - .jpeg
+      - .png
+      - .gif
+      - .bmp
+      - .tif
+      - .tiff
+    change_files_in_place: true
+    overwrite: false
+    hour_adjustment: 0
+    patterns:
+      - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:[ _-]+(?P<hour>\d{2})_(?P<minute>\d{2})_(?P<second>\d{2}))?'
 '''
 
 INVALID_HANDLE_VALUE = c_void_p(-1).value
@@ -157,16 +158,50 @@ def ensure_section(config: dict[str, Any]) -> None:
         visual.print_warning("Added default 'adjust_file_creation_date' section to config.yaml. Please configure it before running.")
         raise SystemExit(1)
 
-
-def get_config_section(config: dict[str, Any]) -> dict[str, Any]:
-    return get_table(config, "adjust_file_creation_date")
+    get_table(config, "adjust_file_creation_date")
 
 
-def registry_path_from_config(script_config: dict[str, Any]) -> str:
+def validate_adjustment_set_name(config: dict[str, Any], set_name: str) -> str:
+    adjustment_sets = get_table(config, "adjust_file_creation_date")
+
+    if set_name not in adjustment_sets:
+        available_sets = ", ".join(adjustment_sets) or "none"
+        raise SystemExit(f"Unknown file creation date adjustment set '{set_name}'. Available sets: {available_sets}")
+
+    return set_name
+
+
+def adjustment_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any]:
+    adjustment_sets = get_table(config, "adjust_file_creation_date")
+    adjustment_set = adjustment_sets.get(set_name)
+
+    if not isinstance(adjustment_set, dict):
+        raise TypeError(f"File creation date adjustment set '{set_name}' must be a table")
+
+    return adjustment_set
+
+
+def choose_adjustment_set_terminal(config: dict[str, Any]) -> str:
+    adjustment_sets = get_table(config, "adjust_file_creation_date")
+    return menu.choose_mapping_key_terminal(
+        adjustment_sets,
+        header="Available file creation date adjustment sets:",
+        empty_message="No file creation date adjustment sets configured in config.yaml. Please add an 'adjust_file_creation_date' section.",
+    )
+
+
+def adjustment_set_name(config: dict[str, Any]) -> str:
+    if len(sys.argv) > 1:
+        return validate_adjustment_set_name(config, menu.normalize_selection_name(sys.argv[1]))
+
+    return choose_adjustment_set_terminal(config)
+
+
+def registry_path_from_config(script_config: dict[str, Any], set_name: str) -> str:
     registry_path = str(script_config.get("smb_registry_path", "Software\\peripherals")).strip()
 
     if not registry_path:
-        raise ValueError("Configuration value 'adjust_file_creation_date.smb_registry_path' must be set")
+        raise ValueError(f"Configuration value 'adjust_file_creation_date.{set_name}.smb_registry_path' must be set")
 
     return registry_path
 
@@ -200,30 +235,30 @@ def hour_adjustment_from_config(script_config: dict[str, Any]) -> int:
     return int(script_config.get("hour_adjustment", 0))
 
 
-def read_config_list(script_config: dict[str, Any], name: str) -> list[Any]:
+def read_config_list(script_config: dict[str, Any], set_name: str, name: str) -> list[Any]:
     value = script_config.get(name, [])
 
     if not isinstance(value, list):
-        raise TypeError(f"Configuration value 'adjust_file_creation_date.{name}' must be a list")
+        raise TypeError(f"Configuration value 'adjust_file_creation_date.{set_name}.{name}' must be a list")
 
     if not value:
-        raise ValueError(f"Configuration value 'adjust_file_creation_date.{name}' must define at least one entry")
+        raise ValueError(f"Configuration value 'adjust_file_creation_date.{set_name}.{name}' must define at least one entry")
 
     return value
 
 
-def get_file_extensions(script_config: dict) -> set[str]:
-    extensions = read_config_list(script_config, "extensions")
+def get_file_extensions(script_config: dict, set_name: str) -> set[str]:
+    extensions = read_config_list(script_config, set_name, "extensions")
     normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
 
     if not normalized_extensions:
-        raise ValueError("Configuration value 'adjust_file_creation_date.extensions' must define at least one extension")
+        raise ValueError(f"Configuration value 'adjust_file_creation_date.{set_name}.extensions' must define at least one extension")
 
     return normalized_extensions
 
 
-def get_patterns(script_config: dict) -> list[re.Pattern]:
-    pattern_configs = read_config_list(script_config, "patterns")
+def get_patterns(script_config: dict, set_name: str) -> list[re.Pattern]:
+    pattern_configs = read_config_list(script_config, set_name, "patterns")
 
     compiled_patterns: list[re.Pattern] = []
     for index, pattern_config in enumerate(pattern_configs, start=1):
@@ -355,13 +390,13 @@ def prepare_destination(source_file: Path, *, change_files_in_place: bool, targe
     return destination
 
 
-def adjust_file_creation_dates(script_config: dict) -> list[FileAdjustmentResult]:
+def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileAdjustmentResult]:
     source_folder = source_folder_from_config(script_config)
     change_files_in_place = change_files_in_place_from_config(script_config)
     overwrite = overwrite_from_config(script_config)
     target_folder = target_folder_from_config(script_config, source_folder, change_files_in_place)
-    extensions = get_file_extensions(script_config)
-    patterns = get_patterns(script_config)
+    extensions = get_file_extensions(script_config, set_name)
+    patterns = get_patterns(script_config, set_name)
     hour_adjustment = hour_adjustment_from_config(script_config)
 
     results: list[FileAdjustmentResult] = []
@@ -421,20 +456,11 @@ def store_prompted_smb_password(config: dict, password: str) -> None:
     remove_value(config_path, "smb", "password")
 
 
-def ensure_section(config: dict) -> dict:
-    if "adjust_file_creation_date" not in config:
-        append_section_yaml(config, DEFAULT_SECTION)
-        visual.print_warning("Added default 'adjust_file_creation_date' section to config.yaml. Please configure it before running.")
-        raise SystemExit(1)
-
-    return get_config_section(config)
-
-
-def config_for_adjust_smb(config: dict, script_config: dict) -> dict:
+def config_for_adjust_smb(config: dict, script_config: dict, set_name: str) -> dict:
     adjust_smb = script_config.get("smb", False)
 
     if not isinstance(adjust_smb, bool):
-        raise TypeError("Configuration value 'adjust_file_creation_date.smb' must be true or false")
+        raise TypeError(f"Configuration value 'adjust_file_creation_date.{set_name}.smb' must be true or false")
 
     scoped_config = dict(config)
 
@@ -447,22 +473,24 @@ def config_for_adjust_smb(config: dict, script_config: dict) -> dict:
 
 def main() -> None:
     config = load_config(__file__)
-    script_config = ensure_section(config)
+    ensure_section(config)
+    set_name = adjustment_set_name(config)
+    script_config = adjustment_set_config(config, set_name)
 
-    visual.print_start("Starting file creation date adjustment")
+    visual.print_start(f"Starting file creation date adjustment: {set_name}")
     connect_smb.connect_from_config(
-        config_for_adjust_smb(config, script_config),
+        config_for_adjust_smb(config, script_config, set_name),
         on_password_prompted=lambda password: store_prompted_smb_password(config, password),
     )
 
-    results = adjust_file_creation_dates(script_config)
+    results = adjust_file_creation_dates(script_config, set_name)
     summarize_adjustment_results(results)
 
     if any(result.failed for result in results):
         raise FileCreationDateAdjustmentError(results)
 
     changed_count = sum(1 for result in results if result.changed)
-    visual.print_done(f"File creation date adjustment finished: {changed_count} file(s) updated")
+    visual.print_done(f"File creation date adjustment finished: {set_name}: {changed_count} file(s) updated")
 
 
 if __name__ == "__main__":

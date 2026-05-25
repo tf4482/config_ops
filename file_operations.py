@@ -4,7 +4,7 @@ from typing import Any
 
 import yaml
 
-from winutils_python import connect_smb, file_ops, visual
+from winutils_python import connect_smb, file_ops, menu, visual
 
 
 def app_dir(script_file: str | Path) -> Path:
@@ -99,10 +99,6 @@ DEFAULT_SECTION = r'''file_operations:
 '''
 
 
-def normalize_set_name(set_name: str) -> str:
-    return set_name.lstrip("/-")
-
-
 def validate_operation_set_name(config: dict, set_name: str) -> str:
     operation_sets = config_loader.get_table(config, "file_operations")
 
@@ -125,36 +121,16 @@ def operation_set_config(config: dict, set_name: str) -> dict:
 
 def choose_operation_set_terminal(config: dict) -> str:
     operation_sets = config_loader.get_table(config, "file_operations")
-
-    if not operation_sets:
-        raise SystemExit("No file operation sets configured in config.yaml. Please add a 'file_operations' section.")
-
-    names = list(operation_sets.keys())
-    visual.print_list_header("Available file operation sets:")
-    for index, name in enumerate(names, start=1):
-        visual.print_list_item(index, name)
-
-    while True:
-        choice = input("Select set by number or name (or 'exit' to cancel): ").strip()
-
-        if not choice or choice.lower() in {"exit", "quit", "cancel"}:
-            raise SystemExit(0)
-
-        normalized = normalize_set_name(choice)
-        if normalized in operation_sets:
-            return normalized
-
-        if choice.isdigit():
-            number = int(choice)
-            if 1 <= number <= len(names):
-                return names[number - 1]
-
-        visual.print_warning("Invalid selection. Try again.")
+    return menu.choose_mapping_key_terminal(
+        operation_sets,
+        header="Available file operation sets:",
+        empty_message="No file operation sets configured in config.yaml. Please add a 'file_operations' section.",
+    )
 
 
 def operation_set_name(config: dict) -> str:
     if len(sys.argv) > 1:
-        return validate_operation_set_name(config, normalize_set_name(sys.argv[1]))
+        return validate_operation_set_name(config, menu.normalize_selection_name(sys.argv[1]))
 
     return choose_operation_set_terminal(config)
 
