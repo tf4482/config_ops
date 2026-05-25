@@ -5,7 +5,7 @@ from typing import Any
 
 import yaml
 
-from winutils_python import visual
+from winutils_python import menu, visual
 
 
 DEFAULT_SECTION = r'''ssh:
@@ -99,37 +99,14 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
     return value
 
 
-def normalize_set_name(set_name: str) -> str:
-    return set_name.lstrip("/-")
-
-
 def choose_ssh_set_terminal(config: dict) -> str:
     ssh_sets = get_table(config, "ssh")
-
-    if not ssh_sets:
-        raise SystemExit("No SSH sets configured in config.yaml. Please add an 'ssh' section.")
-
-    names = list(ssh_sets.keys())
-    visual.print_list_header("Available SSH sets:")
-    for index, name in enumerate(names, start=1):
-        visual.print_list_item(index, name)
-
-    while True:
-        choice = input("Select SSH set by number or name (or 'exit' to cancel): ").strip()
-
-        if not choice or choice.lower() in {"exit", "quit", "cancel"}:
-            raise SystemExit(0)
-
-        normalized = normalize_set_name(choice)
-        if normalized in ssh_sets:
-            return normalized
-
-        if choice.isdigit():
-            number = int(choice)
-            if 1 <= number <= len(names):
-                return names[number - 1]
-
-        visual.print_warning("Invalid selection. Try again.")
+    return menu.choose_mapping_key_terminal(
+        ssh_sets,
+        header="Available SSH sets:",
+        empty_message="No SSH sets configured in config.yaml. Please add an 'ssh' section.",
+        prompt="Select SSH set by number or name (or 'exit' to cancel): ",
+    )
 
 
 def validate_ssh_set_name(config: dict, set_name: str) -> str:
@@ -147,7 +124,7 @@ def validate_ssh_set_name(config: dict, set_name: str) -> str:
 
 def ssh_set_name(config: dict) -> str:
     if len(sys.argv) > 1:
-        return validate_ssh_set_name(config, normalize_set_name(sys.argv[1]))
+        return validate_ssh_set_name(config, menu.normalize_selection_name(sys.argv[1]))
 
     return choose_ssh_set_terminal(config)
 
