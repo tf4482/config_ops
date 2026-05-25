@@ -51,6 +51,24 @@ uv run python file_operations.pyw backup
 
 Without an argument, it opens either a terminal selection or a small window to choose the operation set.
 
+## 🖼️ Media archive
+
+`archive_media.pyw` moves configured media files into dated archive folders based on filesystem creation time:
+
+```powershell
+uv run python archive_media.pyw
+```
+
+The `archive_media.smb` value controls whether top-level SMB mappings are connected before archiving.
+
+Archive behavior:
+
+- `archive_media.extensions` must be a non-empty list.
+- Each configured task source must exist and must be a directory.
+- Files are moved into `target/YYYY/MM/DD/filename` folders.
+- If one task fails, later tasks still run.
+- After all tasks finish, failures are summarized and reported as a process error.
+
 ## 🔌 SMB connections
 
 `connect_smb.pyw` connects the top-level `smb` mappings from `config.yaml` without running any file operations:
@@ -95,6 +113,16 @@ file_operations:
       tasks:
         - source: 'C:\path\to\source'
           target: 'R:\path\to\target'
+
+archive_media:
+  smb: true
+  extensions:
+    - .jpg
+    - .jpeg
+    - .png
+  tasks:
+    - source: 'R:\pictures\mobilecam'
+      target: 'R:\pictures\mobilecam archive'
 ```
 
 ## 🔌 SMB shares
@@ -106,7 +134,7 @@ Per operation set, `smb` can be:
 - `false` or omitted to skip SMB connections
 - `true` to use the top-level `smb` configuration
 
-SMB credentials and mappings are always defined in the top-level `smb` section. Operation sets only opt in or out with a boolean `smb` value.
+SMB credentials and mappings are always defined in the top-level `smb` section. Operation sets and scripts such as `archive_media` only opt in or out with a boolean `smb` value.
 
 The SMB password is requested when needed and stored in the config in an obfuscated form for later runs.
 
