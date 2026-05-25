@@ -2,7 +2,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox
 
-from winutils_python import config as config_loader
+import config_support as config_loader
 from winutils_python import connect_smb, file_ops, visual
 
 DEFAULT_SECTION = r'''file_operations:
@@ -168,13 +168,36 @@ def config_for_operation_set_smb(config: dict, set_name: str) -> dict:
     raise TypeError(f"File operation set '{set_name}' value 'smb' must be true, false or a table")
 
 
+def store_prompted_smb_password(config: dict, set_name: str, password: str) -> None:
+    operation_set = operation_set_config(config, set_name)
+    set_smb = operation_set.get("smb", False)
+
+    if isinstance(set_smb, dict):
+        set_smb["encrypted_password"] = connect_smb.encrypt_password(password)
+        set_smb.pop("password_file", None)
+        set_smb.pop("password", None)
+        return
+
+    if set_smb is True:
+        config_path = config.get("__config_path__")
+        if config_path is None:
+            raise ValueError("Loaded configuration is missing internal '__config_path__'")
+
+        config_loader.replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
+        config_loader.remove_value(config_path, "smb", "password_file")
+        config_loader.remove_value(config_path, "smb", "password")
+
+
 def main() -> None:
     config = config_loader.load(__file__)
     ensure_section(config)
     set_name = operation_set_name(config)
 
     visual.print_start(f"Starting file operations: {set_name}")
-    connect_smb.connect_from_config(config_for_operation_set_smb(config, set_name))
+    connect_smb.connect_from_config(
+        config_for_operation_set_smb(config, set_name),
+        on_password_prompted=lambda password: store_prompted_smb_password(config, set_name, password),
+    )
     file_ops.run_operation_set(config, set_name)
     visual.print_done(f"File operations finished: {set_name}")
 
