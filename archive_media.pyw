@@ -1,4 +1,5 @@
 import shutil
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +19,29 @@ DEFAULT_SECTION = r'''archive_media:
     - source: 'R:\path\to\source'
       target: 'R:\path\to\target'
 '''
+
+
+@dataclass(frozen=True)
+class ArchiveTaskResult:
+    source: Path
+    target: Path
+    moved_count: int = 0
+    error: Exception | None = None
+
+    @property
+    def failed(self) -> bool:
+        return self.error is not None
+
+
+class ArchiveMediaError(RuntimeError):
+    def __init__(self, results: list[ArchiveTaskResult]) -> None:
+        self.results = results
+        failed_results = [result for result in results if result.failed]
+        summary = ", ".join(
+            f"{result.source} → {result.target}: {result.error}"
+            for result in failed_results
+        )
+        super().__init__(f"{len(failed_results)} archive media task(s) failed: {summary}")
 
 
 def store_prompted_smb_password(config: dict, password: str) -> None:
@@ -139,6 +163,35 @@ def config_for_archive_smb(config: dict, script_config: dict) -> dict:
     return scoped_config
 
 
+def run_archive_tasks(tasks: tuple[tuple[Path, Path], ...], extensions: set[str]) -> list[ArchiveTaskResult]:
+    results: list[ArchiveTaskResult] = []
+
+    for source, target in tasks:
+        try:
+            moved_count = move_media_to_dated_archive(source, target, extensions)
+            results.append(ArchiveTaskResult(source, target, moved_count=moved_count))
+        except Exception as error:
+            visual.print_error(f"Archive task failed: {source} → {target}: {error}")
+            results.append(ArchiveTaskResult(source, target, error=error))
+
+    return results
+
+
+def summarize_archive_results(results: list[ArchiveTaskResult]) -> None:
+    failed_results = [result for result in results if result.failed]
+    successful_count = len(results) - len(failed_results)
+    total_moved = sum(result.moved_count for result in results)
+
+    visual.print_info(
+        f"Media archive summary: {successful_count} succeeded, {len(failed_results)} failed, "
+        f"{len(results)} total, {total_moved} file(s) moved",
+        emoji="list",
+    )
+
+    for result in failed_results:
+        visual.print_error(f"Failed archive task: {result.source} → {result.target}: {result.error}")
+
+
 def main() -> None:
     config = config_loader.load(__file__)
     script_config = ensure_section(config)
@@ -150,15 +203,13 @@ def main() -> None:
     )
 
     extensions = get_media_extensions(script_config)
-    total_moved = 0
+    results = run_archive_tasks(get_archive_tasks(script_config), extensions)
+    summarize_archive_results(results)
 
-    for source, target in get_archive_tasks(script_config):
-        try:
-            total_moved += move_media_to_dated_archive(source, target, extensions)
-        except Exception as error:
-            visual.print_error(f"Archive task failed: {source} → {target}: {error}")
-            raise
+    if any(result.failed for result in results):
+        raise ArchiveMediaError(results)
 
+    total_moved = sum(result.moved_count for result in results)
     visual.print_done(f"Media archive finished: {total_moved} file(s) moved")
 
 
