@@ -35,9 +35,24 @@ DEFAULT_SECTION = r'''adjust_file_creation_date:
 INVALID_HANDLE_VALUE = c_void_p(-1).value
 WINDOWS_TICK = 10_000_000
 WINDOWS_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
+CONFIG_SECTION = "adjust_file_creation_date"
+DEFAULT_SMB_REGISTRY_PATH = "Software\\peripherals"
+CANCEL_CHOICES = {"exit", "quit", "cancel"}
+GENERIC_READ_ATTRIBUTES = 0x0100
+FILE_SHARE_READ_WRITE_DELETE = 0x00000001 | 0x00000002 | 0x00000004
+OPEN_EXISTING = 3
+FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 
 kernel32 = WinDLL("kernel32", use_last_error=True)
-kernel32.CreateFileW.argtypes = (c_wchar_p, c_uint32, c_uint32, c_void_p, c_uint32, c_uint32, c_void_p)
+kernel32.CreateFileW.argtypes = (
+    c_wchar_p,
+    c_uint32,
+    c_uint32,
+    c_void_p,
+    c_uint32,
+    c_uint32,
+    c_void_p,
+)
 kernel32.CreateFileW.restype = c_void_p
 kernel32.SetFileTime.argtypes = (c_void_p, c_void_p, c_void_p, c_void_p)
 kernel32.SetFileTime.restype = c_bool
@@ -146,33 +161,41 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
     return value
 
 
-class config_loader:
-    load = staticmethod(load_config)
-    append_section_yaml = staticmethod(append_section_yaml)
-    get_table = staticmethod(get_table)
-
-
 def ensure_section(config: dict[str, Any]) -> None:
-    if "adjust_file_creation_date" not in config:
+    if CONFIG_SECTION not in config:
         append_section_yaml(config, DEFAULT_SECTION)
-        visual.print_warning("Added default 'adjust_file_creation_date' section to config.yaml. Please configure it before running.")
+        visual.print_warning(
+            f"Added default '{CONFIG_SECTION}' section to config.yaml. "
+            "Please configure it before running."
+        )
         raise SystemExit(1)
 
-    get_table(config, "adjust_file_creation_date")
+    get_adjustment_sets(config)
+
+
+def config_key(set_name: str, name: str) -> str:
+    return f"{CONFIG_SECTION}.{set_name}.{name}"
+
+
+def get_adjustment_sets(config: dict[str, Any]) -> dict[str, Any]:
+    return get_table(config, CONFIG_SECTION)
 
 
 def validate_adjustment_set_name(config: dict[str, Any], set_name: str) -> str:
-    adjustment_sets = get_table(config, "adjust_file_creation_date")
+    adjustment_sets = get_adjustment_sets(config)
 
     if set_name not in adjustment_sets:
         available_sets = ", ".join(adjustment_sets) or "none"
-        raise SystemExit(f"Unknown file creation date adjustment set '{set_name}'. Available sets: {available_sets}")
+        raise SystemExit(
+            f"Unknown file creation date adjustment set '{set_name}'. "
+            f"Available sets: {available_sets}"
+        )
 
     return set_name
 
 
 def adjustment_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any]:
-    adjustment_sets = get_table(config, "adjust_file_creation_date")
+    adjustment_sets = get_adjustment_sets(config)
     adjustment_set = adjustment_sets.get(set_name)
 
     if not isinstance(adjustment_set, dict):
@@ -182,11 +205,14 @@ def adjustment_set_config(config: dict[str, Any], set_name: str) -> dict[str, An
 
 
 def choose_adjustment_set_terminal(config: dict[str, Any]) -> str:
-    adjustment_sets = get_table(config, "adjust_file_creation_date")
+    adjustment_sets = get_adjustment_sets(config)
     return menu.choose_mapping_key_terminal(
         adjustment_sets,
         header="Available file creation date adjustment sets:",
-        empty_message="No file creation date adjustment sets configured in config.yaml. Please add an 'adjust_file_creation_date' section.",
+        empty_message=(
+            "No file creation date adjustment sets configured in config.yaml. "
+            f"Please add an '{CONFIG_SECTION}' section."
+        ),
     )
 
 
@@ -198,17 +224,16 @@ def adjustment_set_name(config: dict[str, Any]) -> str:
 
 
 def registry_path_from_config(script_config: dict[str, Any], set_name: str) -> str:
-    registry_path = str(script_config.get("smb_registry_path", "Software\\peripherals")).strip()
+    registry_path = str(script_config.get("smb_registry_path", DEFAULT_SMB_REGISTRY_PATH)).strip()
 
     if not registry_path:
-        raise ValueError(f"Configuration value 'adjust_file_creation_date.{set_name}.smb_registry_path' must be set")
+        raise ValueError(f"Configuration value '{config_key(set_name, 'smb_registry_path')}' must be set")
 
     return registry_path
 
 
 def source_folder_from_config(script_config: dict[str, Any]) -> Path:
-    source_folder = Path(str(script_config["source_folder"]))
-    return source_folder
+    return Path(str(script_config["source_folder"]))
 
 
 def change_files_in_place_from_config(script_config: dict[str, Any]) -> bool:
@@ -219,7 +244,11 @@ def overwrite_from_config(script_config: dict[str, Any]) -> bool:
     return bool(script_config.get("overwrite", False))
 
 
-def target_folder_from_config(script_config: dict[str, Any], source_folder: Path, change_files_in_place: bool) -> Path:
+def target_folder_from_config(
+    script_config: dict[str, Any],
+    source_folder: Path,
+    change_files_in_place: bool,
+) -> Path:
     if change_files_in_place:
         return source_folder
 
@@ -239,25 +268,25 @@ def read_config_list(script_config: dict[str, Any], set_name: str, name: str) ->
     value = script_config.get(name, [])
 
     if not isinstance(value, list):
-        raise TypeError(f"Configuration value 'adjust_file_creation_date.{set_name}.{name}' must be a list")
+        raise TypeError(f"Configuration value '{config_key(set_name, name)}' must be a list")
 
     if not value:
-        raise ValueError(f"Configuration value 'adjust_file_creation_date.{set_name}.{name}' must define at least one entry")
+        raise ValueError(f"Configuration value '{config_key(set_name, name)}' must define at least one entry")
 
     return value
 
 
-def get_file_extensions(script_config: dict, set_name: str) -> set[str]:
+def get_file_extensions(script_config: dict[str, Any], set_name: str) -> set[str]:
     extensions = read_config_list(script_config, set_name, "extensions")
     normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
 
     if not normalized_extensions:
-        raise ValueError(f"Configuration value 'adjust_file_creation_date.{set_name}.extensions' must define at least one extension")
+        raise ValueError(f"Configuration value '{config_key(set_name, 'extensions')}' must define at least one extension")
 
     return normalized_extensions
 
 
-def get_patterns(script_config: dict, set_name: str) -> list[re.Pattern]:
+def get_patterns(script_config: dict[str, Any], set_name: str) -> list[re.Pattern[str]]:
     pattern_configs = read_config_list(script_config, set_name, "patterns")
 
     compiled_patterns: list[re.Pattern] = []
@@ -275,23 +304,15 @@ def get_patterns(script_config: dict, set_name: str) -> list[re.Pattern]:
             raise ValueError(f"Pattern entry {index} has invalid regex syntax: {error}") from error
 
         group_names = set(compiled_pattern.groupindex)
-        if not ("year" in group_names or "year2" in group_names) or not {"month", "day"}.issubset(group_names):
+        has_year_group = "year" in group_names or "year2" in group_names
+        has_month_day_groups = {"month", "day"}.issubset(group_names)
+
+        if not has_year_group or not has_month_day_groups:
             raise ValueError(f"Pattern entry {index} must define named groups year or year2, plus month and day")
 
         compiled_patterns.append(compiled_pattern)
 
     return compiled_patterns
-
-
-def device_state_key(path: Path) -> str:
-    return str(path)
-
-
-def cleanup_destination(path: Path) -> None:
-    if path.exists() and path.is_dir():
-        shutil.rmtree(path)
-    elif path.exists() or path.is_symlink():
-        path.unlink()
 
 
 def datetime_to_filetime(timestamp: datetime) -> tuple[int, int]:
@@ -307,7 +328,15 @@ class FileTime(Structure):
 def set_file_times(path: Path, timestamp: datetime) -> None:
     low_date_time, high_date_time = datetime_to_filetime(timestamp)
     filetime = FileTime(low_date_time, high_date_time)
-    handle = kernel32.CreateFileW(str(path), 0x0100, 0x00000001 | 0x00000002 | 0x00000004, None, 3, 0x02000000, None)
+    handle = kernel32.CreateFileW(
+        str(path),
+        GENERIC_READ_ATTRIBUTES,
+        FILE_SHARE_READ_WRITE_DELETE,
+        None,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
+        None,
+    )
 
     if handle == INVALID_HANDLE_VALUE:
         raise OSError(f"Could not open file for timestamp update: {path}")
@@ -320,7 +349,7 @@ def set_file_times(path: Path, timestamp: datetime) -> None:
         kernel32.CloseHandle(handle)
 
 
-def parse_timestamp(path: Path, patterns: list[re.Pattern], hour_adjustment: int) -> datetime | None:
+def parse_timestamp(path: Path, patterns: list[re.Pattern[str]], hour_adjustment: int) -> datetime | None:
     file_name_no_ext = path.stem
 
     for pattern in patterns:
@@ -344,7 +373,10 @@ def parse_timestamp(path: Path, patterns: list[re.Pattern], hour_adjustment: int
         if year is None or month is None or day is None:
             raise ValueError(f"Pattern must provide year/year2, month, and day groups: {pattern.pattern}")
 
-        timestamp = datetime.strptime(f"{year}{month}{day}{hour}{minute}{second}", "%Y%m%d%H%M%S").astimezone()
+        timestamp = datetime.strptime(
+            f"{year}{month}{day}{hour}{minute}{second}",
+            "%Y%m%d%H%M%S",
+        ).astimezone()
 
         if hour_adjustment:
             timestamp += timedelta(hours=hour_adjustment)
@@ -373,7 +405,13 @@ def collision_safe_path(path: Path) -> Path:
         counter += 1
 
 
-def prepare_destination(source_file: Path, *, change_files_in_place: bool, target_folder: Path, overwrite: bool) -> Path | None:
+def prepare_destination(
+    source_file: Path,
+    *,
+    change_files_in_place: bool,
+    target_folder: Path,
+    overwrite: bool,
+) -> Path | None:
     if change_files_in_place:
         return source_file
 
@@ -437,7 +475,8 @@ def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
     changed_count = sum(1 for result in results if result.changed)
 
     visual.print_info(
-        f"File creation date adjustment summary: {changed_count} updated, {len(failed_results)} failed, {len(results)} matched file(s)",
+        "File creation date adjustment summary: "
+        f"{changed_count} updated, {len(failed_results)} failed, {len(results)} matched file(s)",
         emoji="list",
     )
 
@@ -451,7 +490,12 @@ def store_prompted_smb_password(config: dict, password: str) -> None:
     if config_path is None:
         raise ValueError("Loaded configuration is missing internal '__config_path__'")
 
-    replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
+    replace_or_add_string_value(
+        config_path,
+        "smb",
+        "encrypted_password",
+        connect_smb.encrypt_password(password),
+    )
     remove_value(config_path, "smb", "password_file")
     remove_value(config_path, "smb", "password")
 
@@ -460,7 +504,7 @@ def config_for_adjust_smb(config: dict, script_config: dict, set_name: str) -> d
     adjust_smb = script_config.get("smb", False)
 
     if not isinstance(adjust_smb, bool):
-        raise TypeError(f"Configuration value 'adjust_file_creation_date.{set_name}.smb' must be true or false")
+        raise TypeError(f"Configuration value '{config_key(set_name, 'smb')}' must be true or false")
 
     scoped_config = dict(config)
 
