@@ -91,9 +91,9 @@ def choose_operation_set_terminal(config: dict) -> str:
         raise SystemExit("No file operation sets configured in config.yaml. Please add a 'file_operations' section.")
 
     names = list(operation_sets.keys())
-    print("Available file operation sets:")
+    visual.print_list_header("Available file operation sets:")
     for index, name in enumerate(names, start=1):
-        print(f"  {index}. {name}")
+        visual.print_list_item(index, name)
 
     while True:
         choice = input("Select set by number or name (or 'exit' to cancel): ").strip()
@@ -110,7 +110,7 @@ def choose_operation_set_terminal(config: dict) -> str:
             if 1 <= number <= len(names):
                 return names[number - 1]
 
-        print("Invalid selection. Try again.")
+        visual.print_warning("Invalid selection. Try again.")
 
 
 def operation_set_name(config: dict) -> str:
