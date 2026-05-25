@@ -106,12 +106,11 @@ def set_file_times(path: Path, timestamp: datetime) -> None:
         kernel32.CloseHandle(handle)
 
 
-def parse_timestamp(path: Path, patterns: list[dict], hour_adjustment: int) -> datetime | None:
+def parse_timestamp(path: Path, patterns: list[re.Pattern], hour_adjustment: int) -> datetime | None:
     file_name_no_ext = path.stem
 
-    for pattern_config in patterns:
-        pattern = str(pattern_config["pattern"])
-        match = re.match(pattern, file_name_no_ext, flags=re.IGNORECASE)
+    for pattern in patterns:
+        match = pattern.match(file_name_no_ext)
 
         if match is None:
             continue
@@ -129,7 +128,7 @@ def parse_timestamp(path: Path, patterns: list[dict], hour_adjustment: int) -> d
             year = f"20{year2}"
 
         if year is None or month is None or day is None:
-            raise ValueError(f"Pattern must provide year/year2, month, and day groups: {pattern}")
+            raise ValueError(f"Pattern must provide year/year2, month, and day groups: {pattern.pattern}")
 
         timestamp = datetime.strptime(
             f"{year}{month}{day}{hour}{minute}{second}",
@@ -180,16 +179,38 @@ def get_file_extensions(script_config: dict) -> set[str]:
     return normalized_extensions
 
 
-def get_patterns(script_config: dict) -> list[dict]:
-    patterns = script_config.get("patterns", [])
+def get_patterns(script_config: dict) -> list[re.Pattern]:
+    pattern_configs = script_config.get("patterns", [])
 
-    if not isinstance(patterns, list):
+    if not isinstance(pattern_configs, list):
         raise TypeError("Configuration value 'adjust_file_creation_date.patterns' must be a list")
 
-    if not patterns:
+    if not pattern_configs:
         raise ValueError("Configuration value 'adjust_file_creation_date.patterns' must define at least one pattern")
 
-    return patterns
+    compiled_patterns: list[re.Pattern] = []
+    for index, pattern_config in enumerate(pattern_configs, start=1):
+        if not isinstance(pattern_config, dict):
+            raise TypeError(f"Pattern entry {index} must be a table with a 'pattern' value")
+
+        pattern_value = pattern_config.get("pattern")
+        if not isinstance(pattern_value, str) or not pattern_value:
+            raise ValueError(f"Pattern entry {index} must define a non-empty 'pattern' string")
+
+        try:
+            compiled_pattern = re.compile(pattern_value, flags=re.IGNORECASE)
+        except re.error as error:
+            raise ValueError(f"Pattern entry {index} has invalid regex syntax: {error}") from error
+
+        group_names = set(compiled_pattern.groupindex)
+        if not ({"year", "year2"} & group_names) or not {"month", "day"}.issubset(group_names):
+            raise ValueError(
+                f"Pattern entry {index} must define named groups year or year2, plus month and day"
+            )
+
+        compiled_patterns.append(compiled_pattern)
+
+    return compiled_patterns
 
 
 def get_target_folder(script_config: dict, source_folder: Path, change_files_in_place: bool) -> Path:
