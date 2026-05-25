@@ -62,6 +62,7 @@ smb:
 
 file_operations:
   backup:
+    smb: true
     robocopy:
       common_options: ['/MT:32', '/W:2', '/R:10', '/XJD', '/XJF', '/XJ', '/XC', '/ETA', '/TEE']
     mirror:
@@ -82,7 +83,13 @@ file_operations:
 
 ## 🔌 SMB shares
 
-Before file operations run, configured SMB shares are connected with `net use`.
+Before file operations run, SMB shares are connected with `net use` only when the selected operation set enables SMB.
+
+Per operation set, `smb` can be:
+
+- `false` or omitted to skip SMB connections
+- `true` to use the top-level `smb` configuration
+- a table to define set-specific SMB credentials and mappings
 
 The SMB password is requested when needed and stored in the config in an obfuscated form for later runs.
 
