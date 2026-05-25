@@ -105,7 +105,8 @@ Per operation set, `smb` can be:
 
 - `false` or omitted to skip SMB connections
 - `true` to use the top-level `smb` configuration
-- a table to define set-specific SMB credentials and mappings
+
+SMB credentials and mappings are always defined in the top-level `smb` section. Operation sets only opt in or out with a boolean `smb` value.
 
 The SMB password is requested when needed and stored in the config in an obfuscated form for later runs.
 
