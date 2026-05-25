@@ -1,11 +1,31 @@
 [project]
 name = "config-ops"
 version = "0.1.0"
-description = "Configuration-driven Windows automation scripts for file operations and backups."
+description = "Configuration-driven Windows automation scripts for SMB, Robocopy, media archiving, SSH tasks, and peripherals."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "winutils-python",
+]
+keywords = [
+    "automation",
+    "backup",
+    "configuration",
+    "robocopy",
+    "smb",
+    "ssh",
+    "windows",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Archiving :: Backup",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
 ]
 
 [tool.uv]
