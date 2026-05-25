@@ -1,33 +1,31 @@
 # ⚙️ config_ops
 
-> Tiny, configuration-driven Windows system tools.
+> 🪄 Configuration-driven Windows automation scripts for recurring local, network, and file-management tasks.
 
-**config_ops** is an early-stage project for automating recurring Windows tasks through simple configuration files.
+The project is intentionally script-oriented: each root script owns its own `config.yaml` section, adds an example section when missing, and delegates reusable Windows-specific helpers to the `winutils_python` submodule.
 
-## 🌱 Vision
+## 🧰 Current tools
 
-In the future, Config Ops may help with:
+- 💾 `file_operations.py` runs named Robocopy operation sets for mirror, copy, and move jobs.
+- 🖼️ `archive_media.py` moves configured media files into dated `YYYY/MM/DD` archive folders.
+- 🕒 `adjust_file_creation_date.py` parses timestamps from filenames and applies them as Windows file times.
+- 🔌 `connect_smb.pyw` connects configured SMB network shares without opening a terminal window.
+- 🚀 `ssh_tasks.py` runs named SSH command sets.
+- 💡 `peripherals.py` toggles simple URL-controlled peripherals and stores state in the Windows registry.
+- 📦 `deploy.py` compiles root `.py` and `.pyw` scripts with PyInstaller and deploys executables from `dist`.
+- 🧩 `winutils_python/` contains reusable helper modules for config handling, SMB, Robocopy, menus, and terminal visuals.
 
-- 💾 Backups and file operations
-- 🔌 Network share connections
-- 🧹 Local maintenance tasks
-- 🚀 Small command automations
+## ✅ Requirements
 
-## 🧩 Current tools
+- 🪟 Windows
+- 🐍 Python `>=3.13`
+- ⚡ `uv`
+- 🔐 OpenSSH tools when using `ssh_tasks.py` or remote deployment in `deploy.py`
+- 💾 `robocopy` for file operations
+- 🔌 `net use` for SMB mappings
+- 🌐 `curl.exe` for `peripherals.py`
 
-- [`archive_media.pyw`](archive_media.pyw) moves media files into dated archive folders.
-- [`adjust_file_creation_date.pyw`](adjust_file_creation_date.pyw) adjusts Windows file timestamps from filename patterns.
-- [`connect_smb.pyw`](connect_smb.pyw) connects configured SMB network shares.
-- [`file_operations.pyw`](file_operations.pyw) runs configured file operation sets.
-- [`ssh_tasks.pyw`](ssh_tasks.pyw) runs configured SSH command sets.
-- [`config_support.py`](config_support.py) owns all reads and writes for the project `config.yaml`.
-- [`winutils_python`](winutils_python/README.md) provides the reusable Windows helper modules.
-
-`winutils_python` is intentionally helper-only: it does not load, create, or mutate this project’s `config.yaml` directly. All project configuration interaction stays in the root scripts.
-
-## 📦 Project packaging
-
-`config_ops` is an application-style `uv` project. The reusable Windows helper package is kept as the Git submodule `winutils_python` and is declared as an editable local dependency in `pyproject.toml`.
+## 🚀 Setup
 
 After cloning, initialize the submodule and sync dependencies:
 
@@ -36,99 +34,39 @@ git submodule update --init --recursive
 uv sync
 ```
 
-## 💾 File operations
+This is an application-style `uv` project. The local `winutils_python` submodule is declared as an editable dependency in `pyproject.toml`.
 
-`file_operations.pyw` can run named operation sets from `config.yaml`.
+## 🧭 Configuration model
 
-Supported operation groups:
+All root scripts read `config.yaml` next to the script or compiled executable. When a section is missing, the script appends a default example section and exits so the file can be configured first.
 
-- `mirror` for Robocopy mirror jobs
-- `copy` for recursive copy jobs
-- `move` for recursive move jobs
+Named-set tools accept a set name as the first argument. If no argument is provided, they use the shared terminal menu from `winutils_python/menu.py`.
 
-The script can be started with a set name:
+Named-set tools:
 
-```powershell
-uv run python file_operations.pyw backup
-```
-
-Without an argument, it opens either a terminal selection or a small window to choose the operation set.
-
-Robocopy results are collected across all configured jobs. Exit codes below `8` are treated as successful Robocopy outcomes; exit codes `8` and above are summarized and reported as a process error after all jobs have been attempted.
-
-## 🖼️ Media archive
-
-`archive_media.pyw` moves configured media files into dated archive folders based on filesystem creation time:
-
-```powershell
-uv run python archive_media.pyw
-```
-
-The `archive_media.smb` value controls whether top-level SMB mappings are connected before archiving.
-
-Archive behavior:
-
-- `archive_media.extensions` must be a non-empty list.
-- Each configured task source must exist and must be a directory.
-- Files are moved into `target/YYYY/MM/DD/filename` folders.
-- If one task fails, later tasks still run.
-- After all tasks finish, failures are summarized and reported as a process error.
-
-## 🕒 File creation date adjustment
-
-`adjust_file_creation_date.pyw` parses timestamps from filenames and applies them as Windows creation, access and modified times:
-
-```powershell
-uv run python adjust_file_creation_date.pyw
-```
-
-Adjustment behavior:
-
-- `adjust_file_creation_date.smb` controls whether top-level SMB mappings are connected first.
-- `extensions` and `patterns` must be non-empty lists.
-- Regex patterns are compiled and checked for required named groups before processing files.
-- Patterns must provide `year` or `year2`, plus `month` and `day`; `hour`, `minute` and `second` are optional.
-- `change_files_in_place: true` updates source files directly.
-- `change_files_in_place: false` copies files to `target_folder` first.
-- `overwrite: false` is collision-safe and creates suffixed filenames like `image_1.jpg` when needed.
-- `overwrite: true` allows existing target files to be replaced by `shutil.copy2`.
-- Individual file failures are collected, later files still run, and failures are summarized as a process error.
-
-## 🚀 SSH tasks
-
-`ssh_tasks.pyw` runs named SSH command sets from `config.yaml`:
-
-```powershell
-uv run python ssh_tasks.pyw manual_backup
-```
-
-Without an argument, it opens either a terminal selection or a small window to choose the SSH set.
-
-SSH task behavior:
-
-- `user`, `host`, `port` and `command` are required.
-- `port` must be in the range `1..65535`.
-- `timeout` is optional and must be a positive number when configured.
-- SSH failures, missing `ssh.exe`, and timeouts are reported clearly.
-- In non-terminal `.pyw` mode, SSH failure details are shown in a GUI error dialog.
-
-## 🔌 SMB connections
-
-`connect_smb.pyw` connects the top-level `smb` mappings from `config.yaml` without running any file operations:
-
-```powershell
-uv run python connect_smb.pyw
-```
-
-If `config.yaml` does not contain an `smb` section yet, the script adds an example section and exits so it can be configured first.
-
-## ⚙️ Configuration
-
-The root scripts own the project configuration file. `config_support.py` loads `config.yaml`, appends missing example sections, and persists prompted SMB passwords. Helper modules in `winutils_python` only receive already-loaded configuration data.
-
-If `config.yaml` does not contain a `file_operations` section yet, `file_operations.pyw` adds an example section automatically.
+- 💾 `file_operations.py`
+- 🖼️ `archive_media.py`
+- 🕒 `adjust_file_creation_date.py`
+- 🚀 `ssh_tasks.py`
 
 Example:
+
+```powershell
+uv run python file_operations.py backup
+uv run python archive_media.py phone_photos
+uv run python adjust_file_creation_date.py screenshots
+uv run python ssh_tasks.py manual_backup
+```
+
+Without an argument:
+
+```powershell
+uv run python file_operations.py
+```
+
+The script prints available sets and asks for a number or name.
+
+## 📝 Example `config.yaml`
 
 ```yaml
 smb:
@@ -158,27 +96,29 @@ file_operations:
           target: 'R:\path\to\target'
 
 archive_media:
-  smb: true
-  extensions:
-    - .jpg
-    - .jpeg
-    - .png
-  tasks:
-    - source: 'R:\pictures\mobilecam'
-      target: 'R:\pictures\mobilecam archive'
+  phone_photos:
+    smb: true
+    extensions:
+      - .jpg
+      - .jpeg
+      - .png
+    tasks:
+      - source: 'R:\pictures\mobilecam'
+        target: 'R:\pictures\mobilecam archive'
 
 adjust_file_creation_date:
-  smb: true
-  source_folder: 'R:\pictures\screenshots'
-  target_folder: ''
-  extensions:
-    - .jpg
-    - .png
-  change_files_in_place: false
-  overwrite: false
-  hour_adjustment: 0
-  patterns:
-    - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})'
+  screenshots:
+    smb: true
+    source_folder: 'R:\pictures\screenshots'
+    target_folder: 'R:\pictures\screenshots adjusted'
+    extensions:
+      - .jpg
+      - .png
+    change_files_in_place: false
+    overwrite: false
+    hour_adjustment: 0
+    patterns:
+      - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})'
 
 ssh:
   manual_backup:
@@ -187,23 +127,132 @@ ssh:
     port: 51215
     timeout: 300
     command: manual_backup.bash
+
+peripherals:
+  registry_path: 'Software\peripherals'
+  led:
+    on: 'https://example.invalid/led/on'
+    off: 'https://example.invalid/led/off'
 ```
 
-## 🔌 SMB shares
+## 🔌 SMB connections
 
-Before file operations run, SMB shares are connected with `net use` only when the selected operation set enables SMB.
+Top-level `smb` defines credentials and mappings. Scripts that support SMB opt in per selected set with `smb: true`.
 
-Per operation set, `smb` can be:
+Per set, `smb` can be:
 
-- `false` or omitted to skip SMB connections
-- `true` to use the top-level `smb` configuration
+- 🚫 `false` or omitted to skip SMB connections
+- ✅ `true` to use the top-level `smb` configuration
 
-SMB credentials and mappings are always defined in the top-level `smb` section. Operation sets and scripts such as `archive_media` and `adjust_file_creation_date` only opt in or out with a boolean `smb` value.
+When SMB is enabled and no encrypted password is stored, the password is prompted and then persisted in `config.yaml` as an obfuscated value. Legacy `password` and `password_file` values are removed after storing the encrypted password.
 
-The SMB password is requested when needed and stored in the config in an obfuscated form for later runs.
+`connect_smb.pyw` directly connects the top-level SMB mappings. Its subprocess calls use Windows no-console creation flags in `winutils_python/connect_smb.py`, so running the `.pyw` script does not open terminal windows for `net use`.
 
-If an SMB mapping fails, the failure is reported as a process error before file operations continue.
+## 💾 File operations
+
+`file_operations.py` runs one named set from `file_operations`.
+
+Supported operation groups:
+
+- 🪞 `mirror`
+- 📋 `copy`
+- 📦 `move`
+
+Each operation group can be either a list of tasks or a table with `tasks`, `overwrite`, and `options`.
+
+Robocopy exit codes below `8` are treated as successful outcomes. Exit codes `8` and above are collected, summarized, and raised after all configured operations have run.
+
+## 🖼️ Media archive
+
+`archive_media.py` runs one named set from `archive_media`.
+
+For each task:
+
+- 📂 `source` must exist and must be a directory.
+- 🎯 `target` is created as needed.
+- 🔎 Matching files are moved recursively.
+- 📅 File creation time determines the destination folder.
+- ♻️ Existing destination files or folders with the same name are removed before moving.
+- 🧾 Task failures are collected while later tasks continue.
+
+## 🕒 File creation date adjustment
+
+`adjust_file_creation_date.py` runs one named set from `adjust_file_creation_date`.
+
+Behavior:
+
+- 📎 `extensions` and `patterns` must be non-empty lists.
+- 🧩 Regex patterns must define `year` or `year2`, plus `month` and `day`.
+- ⏱️ Optional groups are `hour`, `minute`, and `second`.
+- 🔁 `hour_adjustment` shifts parsed timestamps.
+- ✍️ `change_files_in_place: true` updates matching source files directly.
+- 📋 `change_files_in_place: false` copies matching files to `target_folder` or to a `changed_date` folder below the source folder.
+- 🛡️ `overwrite: false` creates collision-safe suffixed names like `image_1.jpg`.
+- 🧾 Individual file failures are collected while later files continue.
+
+## 🚀 SSH tasks
+
+`ssh_tasks.py` runs one named set from `ssh`.
+
+Required values:
+
+- 👤 `user`
+- 🖥️ `host`
+- 🔢 `port`
+- ⌨️ `command`
+
+Optional value:
+
+- ⏳ `timeout`
+
+The port must be in the range `1..65535`. Timeout must be a positive number when configured. Missing `ssh.exe`, timeouts, and non-zero SSH exit codes are reported clearly.
+
+## 💡 Peripherals
+
+`peripherals.py` controls configured devices by calling their `on` and `off` URLs with `curl.exe`.
+
+Usage examples:
+
+```powershell
+uv run python peripherals.py
+uv run python peripherals.py led on
+uv run python peripherals.py tv toggle
+uv run python peripherals.py suspend
+```
+
+Supported commands:
+
+- ✅ `on`
+- 🚫 `off`
+- 🔁 `toggle`
+- 💤 `suspend`
+- ⏯️ `resume`
+
+If no device is selected, the command is applied to all configured devices. If no command is selected, `toggle` is used. Device state is stored under `peripherals.registry_path` in `HKEY_CURRENT_USER`.
+
+## 📦 Deployment
+
+`deploy.py` finds root `.py` and `.pyw` scripts, excluding itself, compiles them with PyInstaller, and deploys the executables from `dist`.
+
+Deployment targets:
+
+- 🏠 local `%USERPROFILE%\bin`
+- 🌐 remote `%USERPROFILE%\bin` over `scp`
+
+The script no longer uses a separate `release` directory. `dist` is cleaned after deployment, and generated `.spec` files are removed.
+
+## 🧩 Helper modules
+
+The `winutils_python` submodule provides reusable helpers:
+
+- 📝 `config.py` for YAML parsing, dumping, scalar parsing, and table validation.
+- 🔌 `connect_smb.py` for password obfuscation and SMB `net use` mapping logic.
+- 💾 `file_ops.py` for Robocopy command construction and operation-set execution.
+- 📋 `menu.py` for shared terminal selection menus.
+- 🎨 `visual.py` for terminal-aware status output.
+
+Root scripts still own project-specific `config.yaml` loading, default-section creation, and persistence decisions.
 
 ## 🚧 Status
 
-This project is usable for first Robocopy-based file operation workflows, but it is still early-stage. Configuration formats and helper APIs may still change.
+The project is usable for Windows automation workflows but remains script-first and configuration-format changes are still possible.
