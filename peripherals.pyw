@@ -14,6 +14,7 @@ CONFIG_SECTION = "peripherals"
 REGISTRY_PATH_KEY = "registry_path"
 VALID_COMMANDS = {"on", "off", "toggle", "suspend", "resume"}
 DEFAULT_COMMAND = "toggle"
+CREATE_NO_WINDOW = 0x08000000
 
 DEFAULT_SECTION = r'''peripherals:
   registry_path: 'Software\peripherals'
@@ -195,12 +196,20 @@ def write_device_state(registry_path: str, device: str, enabled: bool) -> None:
         winreg.SetValueEx(key, device, 0, winreg.REG_DWORD, 1 if enabled else 0)
 
 
+def subprocess_creationflags() -> int:
+    if sys.platform == "win32":
+        return CREATE_NO_WINDOW
+
+    return 0
+
+
 def trigger_url(url: str) -> None:
     subprocess.Popen(
         ["curl.exe", url],
         cwd=script_dir(__file__),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        creationflags=subprocess_creationflags(),
     )
 
 
