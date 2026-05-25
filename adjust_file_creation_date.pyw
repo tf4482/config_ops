@@ -150,7 +150,12 @@ def get_file_extensions(script_config: dict) -> set[str]:
     if not isinstance(extensions, list):
         raise TypeError("Configuration value 'adjust_file_creation_date.extensions' must be a list")
 
-    return {str(extension).lower() for extension in extensions}
+    normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
+
+    if not normalized_extensions:
+        raise ValueError("Configuration value 'adjust_file_creation_date.extensions' must define at least one extension")
+
+    return normalized_extensions
 
 
 def get_patterns(script_config: dict) -> list[dict]:
@@ -158,6 +163,9 @@ def get_patterns(script_config: dict) -> list[dict]:
 
     if not isinstance(patterns, list):
         raise TypeError("Configuration value 'adjust_file_creation_date.patterns' must be a list")
+
+    if not patterns:
+        raise ValueError("Configuration value 'adjust_file_creation_date.patterns' must define at least one pattern")
 
     return patterns
 
