@@ -1,12 +1,104 @@
 import re
 import shutil
+import sys
 from ctypes import Structure, WinDLL, byref, c_bool, c_uint32, c_void_p, c_wchar_p
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
-import config_support as config_loader
+import yaml
+
 from winutils_python import connect_smb, visual
+
+
+def app_dir(script_file: str | Path) -> Path:
+    """Return the directory that should contain config.yaml.
+
+    In a normal Python run this is the script directory.
+    In a PyInstaller .exe this is the .exe directory, not the temporary
+    extraction directory used by --onefile builds.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    return Path(script_file).resolve().parent
+
+
+def script_dir(script_file: str | Path) -> Path:
+    # Backwards-compatible name used by the rest of the script.
+    return app_dir(script_file)
+
+
+def config_path(script_file: str | Path) -> Path:
+    return script_dir(script_file) / "config.yaml"
+
+
+def find_config_path(script_file: str | Path) -> Path:
+    path = config_path(script_file)
+
+    if not path.exists():
+        path.write_text("", encoding="utf-8")
+
+    return path
+
+
+def parse_yaml(config_text: str) -> dict[str, Any]:
+    return yaml.safe_load(config_text) or {}
+
+
+def dump_yaml(config: dict[str, Any]) -> str:
+    clean = {key: value for key, value in config.items() if not key.startswith("__")}
+    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
+
+
+def load_config(script_file: str | Path) -> dict[str, Any]:
+    path = find_config_path(script_file)
+    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
+
+    if loaded_config is None:
+        loaded_config = {}
+
+    loaded_config["__config_path__"] = path
+    return loaded_config
+
+
+def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
+    path = config.get("__config_path__")
+    if isinstance(path, Path):
+        existing = path.read_text(encoding="utf-8").rstrip()
+        separator = "\n\n" if existing else ""
+        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
+
+
+def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
+    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
+    table_config = loaded_config.setdefault(table, {})
+
+    if not isinstance(table_config, dict):
+        raise TypeError(f"Configuration value '{table}' must be a table")
+
+    table_config[key] = value
+    config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
+
+
+def remove_value(config_path: Path, table: str, key: str) -> None:
+    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
+    table_config = loaded_config.get(table, {})
+
+    if isinstance(table_config, dict) and key in table_config:
+        del table_config[key]
+        config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
+
+
+def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
+    value = config.get(name, {})
+
+    if not isinstance(value, dict):
+        raise TypeError(f"Configuration value '{name}' must be a table")
+
+    return value
+
 
 DEFAULT_SECTION = r'''adjust_file_creation_date:
   smb: false
@@ -66,9 +158,9 @@ def store_prompted_smb_password(config: dict, password: str) -> None:
     if config_path is None:
         raise ValueError("Loaded configuration is missing internal '__config_path__'")
 
-    config_loader.replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
-    config_loader.remove_value(config_path, "smb", "password_file")
-    config_loader.remove_value(config_path, "smb", "password")
+    replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
+    remove_value(config_path, "smb", "password_file")
+    remove_value(config_path, "smb", "password")
 
 
 class FileTime(Structure):
@@ -307,11 +399,11 @@ def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
 
 def ensure_section(config: dict) -> dict:
     if "adjust_file_creation_date" not in config:
-        config_loader.append_section_yaml(config, DEFAULT_SECTION)
+        append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning("Added default 'adjust_file_creation_date' section to config.yaml. Please configure it before running.")
         raise SystemExit(1)
 
-    return config_loader.get_table(config, "adjust_file_creation_date")
+    return get_table(config, "adjust_file_creation_date")
 
 
 def config_for_adjust_smb(config: dict, script_config: dict) -> dict:
@@ -330,7 +422,7 @@ def config_for_adjust_smb(config: dict, script_config: dict) -> dict:
 
 
 def main() -> None:
-    config = config_loader.load(__file__)
+    config = load_config(__file__)
     script_config = ensure_section(config)
 
     visual.print_start("Starting file creation date adjustment")
