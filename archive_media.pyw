@@ -2,7 +2,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from winutils_python import config as config_loader
+import config_support as config_loader
 from winutils_python import connect_smb, visual
 
 
@@ -17,6 +17,16 @@ DEFAULT_SECTION = r'''archive_media:
     - source: 'R:\path\to\source'
       target: 'R:\path\to\target'
 '''
+
+
+def store_prompted_smb_password(config: dict, password: str) -> None:
+    config_path = config.get("__config_path__")
+    if config_path is None:
+        raise ValueError("Loaded configuration is missing internal '__config_path__'")
+
+    config_loader.replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
+    config_loader.remove_value(config_path, "smb", "password_file")
+    config_loader.remove_value(config_path, "smb", "password")
 
 
 def get_creation_time(path: Path) -> datetime:
@@ -103,7 +113,10 @@ def main() -> None:
     script_config = ensure_section(config)
 
     visual.print_start("Starting media archive")
-    connect_smb.connect_from_config(config)
+    connect_smb.connect_from_config(
+        config,
+        on_password_prompted=lambda password: store_prompted_smb_password(config, password),
+    )
 
     extensions = get_media_extensions(script_config)
     total_moved = 0
