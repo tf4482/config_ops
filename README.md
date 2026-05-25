@@ -15,8 +15,12 @@ In the future, Config Ops may help with:
 
 ## 🧩 Current tools
 
+- [`connect_smb.pyw`](connect_smb.pyw) connects configured SMB network shares.
 - [`file_operations.pyw`](file_operations.pyw) runs configured file operation sets.
+- [`config_support.py`](config_support.py) owns all reads and writes for the project `config.yaml`.
 - [`winutils_python`](winutils_python/README.md) provides the reusable Windows helper modules.
+
+`winutils_python` is intentionally helper-only: it does not load, create, or mutate this project’s `config.yaml` directly. All project configuration interaction stays in the root scripts.
 
 ## 📦 Project packaging
 
@@ -47,9 +51,21 @@ uv run python file_operations.pyw backup
 
 Without an argument, it opens either a terminal selection or a small window to choose the operation set.
 
+## 🔌 SMB connections
+
+`connect_smb.pyw` connects the top-level `smb` mappings from `config.yaml` without running any file operations:
+
+```powershell
+uv run python connect_smb.pyw
+```
+
+If `config.yaml` does not contain an `smb` section yet, the script adds an example section and exits so it can be configured first.
+
 ## ⚙️ Configuration
 
-If `config.yaml` does not contain a `file_operations` section yet, the script adds an example section automatically.
+The root scripts own the project configuration file. `config_support.py` loads `config.yaml`, appends missing example sections, and persists prompted SMB passwords. Helper modules in `winutils_python` only receive already-loaded configuration data.
+
+If `config.yaml` does not contain a `file_operations` section yet, `file_operations.pyw` adds an example section automatically.
 
 Example:
 
@@ -92,6 +108,8 @@ Per operation set, `smb` can be:
 - a table to define set-specific SMB credentials and mappings
 
 The SMB password is requested when needed and stored in the config in an obfuscated form for later runs.
+
+If an SMB mapping fails, the failure is reported as a process error before file operations continue.
 
 ## 🚧 Status
 
