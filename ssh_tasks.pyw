@@ -3,7 +3,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox
 
-from winutils_python import config as config_loader
+import config_support as config_loader
 from winutils_python import visual
 
 
@@ -73,9 +73,9 @@ def choose_ssh_set_terminal(config: dict) -> str:
         raise SystemExit("No SSH sets configured in config.yaml. Please add an 'ssh' section.")
 
     names = list(ssh_sets.keys())
-    print("Available SSH sets:")
+    visual.print_list_header("Available SSH sets:")
     for index, name in enumerate(names, start=1):
-        print(f"  {index}. {name}")
+        visual.print_list_item(index, name)
 
     while True:
         choice = input("Select SSH set by number or name (or 'exit' to cancel): ").strip()
@@ -92,12 +92,25 @@ def choose_ssh_set_terminal(config: dict) -> str:
             if 1 <= number <= len(names):
                 return names[number - 1]
 
-        print("Invalid selection. Try again.")
+        visual.print_warning("Invalid selection. Try again.")
+
+
+def validate_ssh_set_name(config: dict, set_name: str) -> str:
+    if set_name.lower() in {"exit", "quit", "cancel"}:
+        raise SystemExit(0)
+
+    ssh_sets = config_loader.get_table(config, "ssh")
+
+    if set_name not in ssh_sets:
+        available_sets = ", ".join(ssh_sets) or "none"
+        raise SystemExit(f"Unknown SSH set '{set_name}'. Available sets: {available_sets}")
+
+    return set_name
 
 
 def ssh_set_name(config: dict) -> str:
     if len(sys.argv) > 1:
-        return normalize_set_name(sys.argv[1])
+        return validate_ssh_set_name(config, normalize_set_name(sys.argv[1]))
 
     if visual.is_terminal():
         return choose_ssh_set_terminal(config)
@@ -155,10 +168,12 @@ def main() -> None:
     port = required_port(ssh_cfg)
     command = required_str(ssh_cfg, "command")
 
+    visual.print_start(f"Starting SSH task: {set_name}")
     subprocess.run(
         ["ssh", f"{user}@{host}", "-p", str(port), command],
         check=True,
     )
+    visual.print_done(f"SSH task finished: {set_name}")
 
 
 if __name__ == "__main__":
