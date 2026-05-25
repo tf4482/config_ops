@@ -16,6 +16,7 @@ In the future, Config Ops may help with:
 ## 🧩 Current tools
 
 - [`archive_media.pyw`](archive_media.pyw) moves media files into dated archive folders.
+- [`adjust_file_creation_date.pyw`](adjust_file_creation_date.pyw) adjusts Windows file timestamps from filename patterns.
 - [`connect_smb.pyw`](connect_smb.pyw) connects configured SMB network shares.
 - [`file_operations.pyw`](file_operations.pyw) runs configured file operation sets.
 - [`ssh_tasks.pyw`](ssh_tasks.pyw) runs configured SSH command sets.
@@ -72,6 +73,26 @@ Archive behavior:
 - Files are moved into `target/YYYY/MM/DD/filename` folders.
 - If one task fails, later tasks still run.
 - After all tasks finish, failures are summarized and reported as a process error.
+
+## 🕒 File creation date adjustment
+
+`adjust_file_creation_date.pyw` parses timestamps from filenames and applies them as Windows creation, access and modified times:
+
+```powershell
+uv run python adjust_file_creation_date.pyw
+```
+
+Adjustment behavior:
+
+- `adjust_file_creation_date.smb` controls whether top-level SMB mappings are connected first.
+- `extensions` and `patterns` must be non-empty lists.
+- Regex patterns are compiled and checked for required named groups before processing files.
+- Patterns must provide `year` or `year2`, plus `month` and `day`; `hour`, `minute` and `second` are optional.
+- `change_files_in_place: true` updates source files directly.
+- `change_files_in_place: false` copies files to `target_folder` first.
+- `overwrite: false` is collision-safe and creates suffixed filenames like `image_1.jpg` when needed.
+- `overwrite: true` allows existing target files to be replaced by `shutil.copy2`.
+- Individual file failures are collected, later files still run, and failures are summarized as a process error.
 
 ## 🚀 SSH tasks
 
@@ -146,6 +167,19 @@ archive_media:
     - source: 'R:\pictures\mobilecam'
       target: 'R:\pictures\mobilecam archive'
 
+adjust_file_creation_date:
+  smb: true
+  source_folder: 'R:\pictures\screenshots'
+  target_folder: ''
+  extensions:
+    - .jpg
+    - .png
+  change_files_in_place: false
+  overwrite: false
+  hour_adjustment: 0
+  patterns:
+    - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})'
+
 ssh:
   manual_backup:
     user: user
@@ -164,7 +198,7 @@ Per operation set, `smb` can be:
 - `false` or omitted to skip SMB connections
 - `true` to use the top-level `smb` configuration
 
-SMB credentials and mappings are always defined in the top-level `smb` section. Operation sets and scripts such as `archive_media` only opt in or out with a boolean `smb` value.
+SMB credentials and mappings are always defined in the top-level `smb` section. Operation sets and scripts such as `archive_media` and `adjust_file_creation_date` only opt in or out with a boolean `smb` value.
 
 The SMB password is requested when needed and stored in the config in an obfuscated form for later runs.
 
