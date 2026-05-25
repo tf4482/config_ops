@@ -1,6 +1,7 @@
 import re
 import shutil
 from ctypes import Structure, WinDLL, byref, c_bool, c_uint32, c_void_p, c_wchar_p
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -36,6 +37,27 @@ kernel32.SetFileTime.argtypes = (c_void_p, c_void_p, c_void_p, c_void_p)
 kernel32.SetFileTime.restype = c_bool
 kernel32.CloseHandle.argtypes = (c_void_p,)
 kernel32.CloseHandle.restype = c_bool
+
+
+@dataclass(frozen=True)
+class FileAdjustmentResult:
+    source: Path
+    destination: Path | None = None
+    timestamp: datetime | None = None
+    changed: bool = False
+    error: Exception | None = None
+
+    @property
+    def failed(self) -> bool:
+        return self.error is not None
+
+
+class FileCreationDateAdjustmentError(RuntimeError):
+    def __init__(self, results: list[FileAdjustmentResult]) -> None:
+        self.results = results
+        failed_results = [result for result in results if result.failed]
+        summary = ", ".join(f"{result.source}: {result.error}" for result in failed_results)
+        super().__init__(f"{len(failed_results)} file creation date adjustment(s) failed: {summary}")
 
 
 def store_prompted_smb_password(config: dict, password: str) -> None:
@@ -182,7 +204,7 @@ def get_target_folder(script_config: dict, source_folder: Path, change_files_in_
     return source_folder / "changed_date"
 
 
-def adjust_file_creation_dates(script_config: dict) -> int:
+def adjust_file_creation_dates(script_config: dict) -> list[FileAdjustmentResult]:
     source_folder = Path(str(script_config["source_folder"]))
     change_files_in_place = bool(script_config.get("change_files_in_place", True))
     target_folder = get_target_folder(script_config, source_folder, change_files_in_place)
@@ -190,7 +212,7 @@ def adjust_file_creation_dates(script_config: dict) -> int:
     patterns = get_patterns(script_config)
     hour_adjustment = int(script_config.get("hour_adjustment", 0))
 
-    changed_count = 0
+    results: list[FileAdjustmentResult] = []
     prepare_target_folder(change_files_in_place, target_folder)
 
     visual.print_info(f"Adjusting file creation dates in {source_folder}", emoji="archive")
@@ -202,23 +224,41 @@ def adjust_file_creation_dates(script_config: dict) -> int:
         if source_file.suffix.lower() not in extensions:
             continue
 
-        timestamp = parse_timestamp(source_file, patterns, hour_adjustment)
-        if timestamp is None:
-            continue
+        try:
+            timestamp = parse_timestamp(source_file, patterns, hour_adjustment)
+            if timestamp is None:
+                continue
 
-        destination = prepare_destination(
-            source_file,
-            change_files_in_place=change_files_in_place,
-            target_folder=target_folder,
-        )
-        if destination is None:
-            continue
+            destination = prepare_destination(
+                source_file,
+                change_files_in_place=change_files_in_place,
+                target_folder=target_folder,
+            )
+            if destination is None:
+                continue
 
-        set_file_times(destination, timestamp)
-        changed_count += 1
-        visual.print_success(f"Updated {destination.name} → {timestamp:%Y-%m-%d %H:%M:%S}")
+            set_file_times(destination, timestamp)
+            results.append(FileAdjustmentResult(source_file, destination, timestamp, changed=True))
+            visual.print_success(f"Updated {destination.name} → {timestamp:%Y-%m-%d %H:%M:%S}")
+        except Exception as error:
+            visual.print_error(f"File creation date adjustment failed: {source_file}: {error}")
+            results.append(FileAdjustmentResult(source_file, error=error))
 
-    return changed_count
+    return results
+
+
+def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
+    failed_results = [result for result in results if result.failed]
+    changed_count = sum(1 for result in results if result.changed)
+
+    visual.print_info(
+        f"File creation date adjustment summary: {changed_count} updated, "
+        f"{len(failed_results)} failed, {len(results)} matched file(s)",
+        emoji="list",
+    )
+
+    for result in failed_results:
+        visual.print_error(f"Failed timestamp update: {result.source}: {result.error}")
 
 
 def ensure_section(config: dict) -> dict:
@@ -255,7 +295,13 @@ def main() -> None:
         on_password_prompted=lambda password: store_prompted_smb_password(config, password),
     )
 
-    changed_count = adjust_file_creation_dates(script_config)
+    results = adjust_file_creation_dates(script_config)
+    summarize_adjustment_results(results)
+
+    if any(result.failed for result in results):
+        raise FileCreationDateAdjustmentError(results)
+
+    changed_count = sum(1 for result in results if result.changed)
     visual.print_done(f"File creation date adjustment finished: {changed_count} file(s) updated")
 
 
