@@ -7,6 +7,9 @@ import yaml
 
 from winutils_python import menu, visual
 
+CONFIG_SECTION = "ssh"
+CANCEL_CHOICES = {"exit", "quit", "cancel"}
+
 
 DEFAULT_SECTION = r'''ssh:
   example_set:
@@ -55,10 +58,13 @@ def load_config(script_file: str | Path) -> dict[str, Any]:
 
 def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
     path = config.get("__config_path__")
-    if isinstance(path, Path):
-        existing = path.read_text(encoding="utf-8").rstrip()
-        separator = "\n\n" if existing else ""
-        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
+
+    if not isinstance(path, Path):
+        return
+
+    existing = path.read_text(encoding="utf-8").rstrip()
+    separator = "\n\n" if existing else ""
+    path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
 
 
 def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
@@ -99,21 +105,25 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
     return value
 
 
-def choose_ssh_set_terminal(config: dict) -> str:
-    ssh_sets = get_table(config, "ssh")
+def get_ssh_sets(config: dict[str, Any]) -> dict[str, Any]:
+    return get_table(config, CONFIG_SECTION)
+
+
+def choose_ssh_set_terminal(config: dict[str, Any]) -> str:
+    ssh_sets = get_ssh_sets(config)
     return menu.choose_mapping_key_terminal(
         ssh_sets,
         header="Available SSH sets:",
-        empty_message="No SSH sets configured in config.yaml. Please add an 'ssh' section.",
+        empty_message=f"No SSH sets configured in config.yaml. Please add an '{CONFIG_SECTION}' section.",
         prompt="Select SSH set by number or name (or 'exit' to cancel): ",
     )
 
 
-def validate_ssh_set_name(config: dict, set_name: str) -> str:
-    if set_name.lower() in {"exit", "quit", "cancel"}:
+def validate_ssh_set_name(config: dict[str, Any], set_name: str) -> str:
+    if set_name.lower() in CANCEL_CHOICES:
         raise SystemExit(0)
 
-    ssh_sets = get_table(config, "ssh")
+    ssh_sets = get_ssh_sets(config)
 
     if set_name not in ssh_sets:
         available_sets = ", ".join(ssh_sets) or "none"
@@ -122,18 +132,18 @@ def validate_ssh_set_name(config: dict, set_name: str) -> str:
     return set_name
 
 
-def ssh_set_name(config: dict) -> str:
+def ssh_set_name(config: dict[str, Any]) -> str:
     if len(sys.argv) > 1:
         return validate_ssh_set_name(config, menu.normalize_selection_name(sys.argv[1]))
 
     return choose_ssh_set_terminal(config)
 
 
-def get_ssh_set(config: dict, set_name: str) -> dict:
-    if set_name.lower() in {"exit", "quit", "cancel"}:
+def get_ssh_set(config: dict[str, Any], set_name: str) -> dict[str, Any]:
+    if set_name.lower() in CANCEL_CHOICES:
         raise SystemExit(0)
 
-    ssh_sets = get_table(config, "ssh")
+    ssh_sets = get_ssh_sets(config)
     ssh_cfg = ssh_sets.get(set_name)
 
     if not isinstance(ssh_cfg, dict):
@@ -142,7 +152,7 @@ def get_ssh_set(config: dict, set_name: str) -> dict:
     return ssh_cfg
 
 
-def required_str(config: dict, key: str) -> str:
+def required_str(config: dict[str, Any], key: str) -> str:
     value = config.get(key)
     if not isinstance(value, str) or not value:
         raise ValueError(f"SSH config value '{key}' must be a non-empty string")
@@ -150,7 +160,7 @@ def required_str(config: dict, key: str) -> str:
     return value
 
 
-def required_port(config: dict) -> int:
+def required_port(config: dict[str, Any]) -> int:
     value = config.get("port")
     port: int
 
@@ -167,7 +177,7 @@ def required_port(config: dict) -> int:
     return port
 
 
-def optional_timeout(config: dict) -> float | None:
+def optional_timeout(config: dict[str, Any]) -> float | None:
     value = config.get("timeout")
 
     if value is None:
@@ -189,18 +199,29 @@ def optional_timeout(config: dict) -> float | None:
     return timeout
 
 
-def ensure_section(config: dict) -> None:
-    if "ssh" not in config:
+def ensure_section(config: dict[str, Any]) -> None:
+    if CONFIG_SECTION not in config:
         append_section_yaml(config, DEFAULT_SECTION)
-        visual.print_warning("Added default 'ssh' section to config.yaml. Please configure it before running.")
+        visual.print_warning(
+            f"Added default '{CONFIG_SECTION}' section to config.yaml. Please configure it before running."
+        )
         raise SystemExit(1)
+
+    get_ssh_sets(config)
 
 
 def report_ssh_error(title: str, message: str) -> None:
     visual.print_error(f"{title}: {message}")
 
 
-def run_ssh_task(set_name: str, user: str, host: str, port: int, command: str, timeout: float | None) -> None:
+def run_ssh_task(
+    set_name: str,
+    user: str,
+    host: str,
+    port: int,
+    command: str,
+    timeout: float | None,
+) -> None:
     try:
         subprocess.run(
             ["ssh", f"{user}@{host}", "-p", str(port), command],
