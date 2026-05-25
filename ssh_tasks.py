@@ -1,8 +1,6 @@
 import subprocess
 import sys
-import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox
 from typing import Any
 
 import yaml
@@ -112,52 +110,6 @@ def normalize_set_name(set_name: str) -> str:
     return set_name.lstrip("/-")
 
 
-def choose_ssh_set(config: dict) -> str:
-    ssh_sets = get_table(config, "ssh")
-
-    if not ssh_sets:
-        raise SystemExit("No SSH sets configured in config.yaml. Please add an 'ssh' section.")
-
-    root = tk.Tk()
-    root.title("Choose SSH command")
-    root.geometry("420x320")
-    root.attributes("-topmost", True)
-
-    selected = tk.StringVar(value="")
-    tk.Label(root, text="Choose an SSH command set:").pack(padx=12, pady=(12, 6), anchor="w")
-
-    listbox = tk.Listbox(root)
-    for name in ssh_sets:
-        listbox.insert(tk.END, name)
-    listbox.selection_set(0)
-    listbox.pack(padx=12, pady=6, fill=tk.BOTH, expand=True)
-
-    def accept_selection() -> None:
-        selection = listbox.curselection()
-        if not selection:
-            messagebox.showwarning("No selection", "Select an SSH command set first.", parent=root)
-            return
-
-        selected.set(str(listbox.get(selection[0])))
-        root.destroy()
-
-    def cancel_selection() -> None:
-        root.destroy()
-
-    button_frame = tk.Frame(root)
-    button_frame.pack(padx=12, pady=(6, 12), fill=tk.X)
-    tk.Button(button_frame, text="Run", command=accept_selection).pack(side=tk.RIGHT, padx=(6, 0))
-    tk.Button(button_frame, text="Cancel", command=cancel_selection).pack(side=tk.RIGHT)
-
-    listbox.bind("<Double-Button-1>", lambda _event: accept_selection())
-    root.mainloop()
-
-    if not selected.get():
-        raise SystemExit("No SSH command set selected")
-
-    return selected.get()
-
-
 def choose_ssh_set_terminal(config: dict) -> str:
     ssh_sets = get_table(config, "ssh")
 
@@ -204,10 +156,7 @@ def ssh_set_name(config: dict) -> str:
     if len(sys.argv) > 1:
         return validate_ssh_set_name(config, normalize_set_name(sys.argv[1]))
 
-    if visual.is_terminal():
-        return choose_ssh_set_terminal(config)
-
-    return choose_ssh_set(config)
+    return choose_ssh_set_terminal(config)
 
 
 def get_ssh_set(config: dict, set_name: str) -> dict:
@@ -280,18 +229,6 @@ def ensure_section(config: dict) -> None:
 def report_ssh_error(title: str, message: str) -> None:
     visual.print_error(f"{title}: {message}")
 
-    if visual.is_terminal():
-        return
-
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-
-    try:
-        messagebox.showerror(title, message, parent=root)
-    finally:
-        root.destroy()
-
 
 def run_ssh_task(set_name: str, user: str, host: str, port: int, command: str, timeout: float | None) -> None:
     try:
@@ -299,7 +236,7 @@ def run_ssh_task(set_name: str, user: str, host: str, port: int, command: str, t
             ["ssh", f"{user}@{host}", "-p", str(port), command],
             check=True,
             timeout=timeout,
-            capture_output=not visual.is_terminal(),
+            capture_output=True,
             text=True,
         )
     except FileNotFoundError as error:
