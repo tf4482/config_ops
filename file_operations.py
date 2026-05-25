@@ -1,9 +1,71 @@
 import sys
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox
+from typing import Any
 
-import config_support as config_loader
+import yaml
+
 from winutils_python import connect_smb, file_ops, visual
+
+
+def app_dir(script_file: str | Path) -> Path:
+    """Return the directory that should contain config.yaml.
+
+    In a normal Python run this is the script directory.
+    In a PyInstaller .exe this is the .exe directory, not the temporary
+    extraction directory used by --onefile builds.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    return Path(script_file).resolve().parent
+
+
+def script_dir(script_file: str | Path) -> Path:
+    # Backwards-compatible name used by the rest of the script.
+    return app_dir(script_file)
+
+def config_path(script_file: str | Path) -> Path:
+    return script_dir(script_file) / "config.yaml"
+
+def find_config_path(script_file: str | Path) -> Path:
+    path = config_path(script_file)
+    if not path.exists():
+        path.write_text("", encoding="utf-8")
+    return path
+
+def parse_yaml(config_text: str) -> dict[str, Any]:
+    return yaml.safe_load(config_text) or {}
+
+def dump_yaml(config: dict[str, Any]) -> str:
+    clean = {k: v for k, v in config.items() if not k.startswith("__")}
+    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
+
+def load(script_file: str | Path) -> dict[str, Any]:
+    path = find_config_path(script_file)
+    loaded_config = parse_yaml(path.read_text(encoding="utf-8")) or {}
+    loaded_config["__config_path__"] = path
+    return loaded_config
+
+def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
+    path = config.get("__config_path__")
+    if isinstance(path, Path):
+        existing = path.read_text(encoding="utf-8").rstrip()
+        separator = "\n\n" if existing else ""
+        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
+
+def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
+    value = config.get(name, {})
+    if not isinstance(value, dict):
+        raise TypeError(f"Configuration value '{name}' must be a table")
+    return value
+
+class config_loader:
+    load = staticmethod(load)
+    append_section_yaml = staticmethod(append_section_yaml)
+    get_table = staticmethod(get_table)
+
 
 DEFAULT_SECTION = r'''file_operations:
   example_set:
