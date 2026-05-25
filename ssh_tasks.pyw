@@ -186,6 +186,48 @@ def ensure_section(config: dict) -> None:
         raise SystemExit(1)
 
 
+def report_ssh_error(title: str, message: str) -> None:
+    visual.print_error(f"{title}: {message}")
+
+    if visual.is_terminal():
+        return
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+
+    try:
+        messagebox.showerror(title, message, parent=root)
+    finally:
+        root.destroy()
+
+
+def run_ssh_task(set_name: str, user: str, host: str, port: int, command: str, timeout: float | None) -> None:
+    try:
+        subprocess.run(
+            ["ssh", f"{user}@{host}", "-p", str(port), command],
+            check=True,
+            timeout=timeout,
+            capture_output=not visual.is_terminal(),
+            text=True,
+        )
+    except FileNotFoundError as error:
+        message = "The 'ssh' executable was not found in PATH. Install OpenSSH or add ssh.exe to PATH."
+        report_ssh_error(f"SSH task failed: {set_name}", message)
+        raise RuntimeError(message) from error
+    except subprocess.TimeoutExpired as error:
+        message = f"SSH task timed out after {error.timeout} second(s)."
+        report_ssh_error(f"SSH task timed out: {set_name}", message)
+        raise
+    except subprocess.CalledProcessError as error:
+        stderr = (error.stderr or "").strip()
+        stdout = (error.stdout or "").strip()
+        details = stderr or stdout or "No SSH output was captured."
+        message = f"SSH exited with code {error.returncode}. {details}"
+        report_ssh_error(f"SSH task failed: {set_name}", message)
+        raise
+
+
 def main() -> None:
     cfg = config_loader.load(__file__)
     ensure_section(cfg)
@@ -199,11 +241,7 @@ def main() -> None:
     command = required_str(ssh_cfg, "command")
 
     visual.print_start(f"Starting SSH task: {set_name}")
-    subprocess.run(
-        ["ssh", f"{user}@{host}", "-p", str(port), command],
-        check=True,
-        timeout=timeout,
-    )
+    run_ssh_task(set_name, user, host, port, command, timeout)
     visual.print_done(f"SSH task finished: {set_name}")
 
 
