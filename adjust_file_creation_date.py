@@ -12,94 +12,6 @@ import yaml
 from winutils_python import connect_smb, visual
 
 
-def app_dir(script_file: str | Path) -> Path:
-    """Return the directory that should contain config.yaml.
-
-    In a normal Python run this is the script directory.
-    In a PyInstaller .exe this is the .exe directory, not the temporary
-    extraction directory used by --onefile builds.
-    """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-
-    return Path(script_file).resolve().parent
-
-
-def script_dir(script_file: str | Path) -> Path:
-    # Backwards-compatible name used by the rest of the script.
-    return app_dir(script_file)
-
-
-def config_path(script_file: str | Path) -> Path:
-    return script_dir(script_file) / "config.yaml"
-
-
-def find_config_path(script_file: str | Path) -> Path:
-    path = config_path(script_file)
-
-    if not path.exists():
-        path.write_text("", encoding="utf-8")
-
-    return path
-
-
-def parse_yaml(config_text: str) -> dict[str, Any]:
-    return yaml.safe_load(config_text) or {}
-
-
-def dump_yaml(config: dict[str, Any]) -> str:
-    clean = {key: value for key, value in config.items() if not key.startswith("__")}
-    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
-
-
-def load_config(script_file: str | Path) -> dict[str, Any]:
-    path = find_config_path(script_file)
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-
-    if loaded_config is None:
-        loaded_config = {}
-
-    loaded_config["__config_path__"] = path
-    return loaded_config
-
-
-def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
-    path = config.get("__config_path__")
-    if isinstance(path, Path):
-        existing = path.read_text(encoding="utf-8").rstrip()
-        separator = "\n\n" if existing else ""
-        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
-
-
-def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.setdefault(table, {})
-
-    if not isinstance(table_config, dict):
-        raise TypeError(f"Configuration value '{table}' must be a table")
-
-    table_config[key] = value
-    config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def remove_value(config_path: Path, table: str, key: str) -> None:
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.get(table, {})
-
-    if isinstance(table_config, dict) and key in table_config:
-        del table_config[key]
-        config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
-    value = config.get(name, {})
-
-    if not isinstance(value, dict):
-        raise TypeError(f"Configuration value '{name}' must be a table")
-
-    return value
-
-
 DEFAULT_SECTION = r'''adjust_file_creation_date:
   smb: false
   source_folder: 'R:\path\to\files'
@@ -153,40 +65,214 @@ class FileCreationDateAdjustmentError(RuntimeError):
         super().__init__(f"{len(failed_results)} file creation date adjustment(s) failed: {summary}")
 
 
-def store_prompted_smb_password(config: dict, password: str) -> None:
-    config_path = config.get("__config_path__")
-    if config_path is None:
-        raise ValueError("Loaded configuration is missing internal '__config_path__'")
+def app_dir(script_file: str | Path) -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
 
-    replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
-    remove_value(config_path, "smb", "password_file")
-    remove_value(config_path, "smb", "password")
+    return Path(script_file).resolve().parent
+
+
+def script_dir(script_file: str | Path) -> Path:
+    return app_dir(script_file)
+
+
+def config_path(script_file: str | Path) -> Path:
+    return script_dir(script_file) / "config.yaml"
+
+
+def find_config_path(script_file: str | Path) -> Path:
+    path = config_path(script_file)
+
+    if not path.exists():
+        path.write_text("", encoding="utf-8")
+
+    return path
+
+
+def parse_yaml(config_text: str) -> dict[str, Any]:
+    return yaml.safe_load(config_text) or {}
+
+
+def dump_yaml(config: dict[str, Any]) -> str:
+    clean = {key: value for key, value in config.items() if not key.startswith("__")}
+    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
+
+
+def load_config(script_file: str | Path) -> dict[str, Any]:
+    path = find_config_path(script_file)
+    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
+    loaded_config["__config_path__"] = path
+    return loaded_config
+
+
+def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
+    path = config.get("__config_path__")
+
+    if not isinstance(path, Path):
+        return
+
+    existing = path.read_text(encoding="utf-8").rstrip()
+    separator = "\n\n" if existing else ""
+    path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
+
+
+def replace_or_add_string_value(path: Path, table: str, key: str, value: str) -> None:
+    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
+    table_config = loaded_config.setdefault(table, {})
+
+    if not isinstance(table_config, dict):
+        raise TypeError(f"Configuration value '{table}' must be a table")
+
+    table_config[key] = value
+    path.write_text(dump_yaml(loaded_config), encoding="utf-8")
+
+
+def remove_value(path: Path, table: str, key: str) -> None:
+    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
+    table_config = loaded_config.get(table, {})
+
+    if isinstance(table_config, dict) and key in table_config:
+        del table_config[key]
+        path.write_text(dump_yaml(loaded_config), encoding="utf-8")
+
+
+def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
+    value = config.get(name, {})
+
+    if not isinstance(value, dict):
+        raise TypeError(f"Configuration value '{name}' must be a table")
+
+    return value
+
+
+class config_loader:
+    load = staticmethod(load_config)
+    append_section_yaml = staticmethod(append_section_yaml)
+    get_table = staticmethod(get_table)
+
+
+def ensure_section(config: dict[str, Any]) -> None:
+    if "adjust_file_creation_date" not in config:
+        append_section_yaml(config, DEFAULT_SECTION)
+        visual.print_warning("Added default 'adjust_file_creation_date' section to config.yaml. Please configure it before running.")
+        raise SystemExit(1)
+
+
+def get_config_section(config: dict[str, Any]) -> dict[str, Any]:
+    return get_table(config, "adjust_file_creation_date")
+
+
+def registry_path_from_config(script_config: dict[str, Any]) -> str:
+    registry_path = str(script_config.get("smb_registry_path", "Software\\peripherals")).strip()
+
+    if not registry_path:
+        raise ValueError("Configuration value 'adjust_file_creation_date.smb_registry_path' must be set")
+
+    return registry_path
+
+
+def source_folder_from_config(script_config: dict[str, Any]) -> Path:
+    source_folder = Path(str(script_config["source_folder"]))
+    return source_folder
+
+
+def change_files_in_place_from_config(script_config: dict[str, Any]) -> bool:
+    return bool(script_config.get("change_files_in_place", True))
+
+
+def overwrite_from_config(script_config: dict[str, Any]) -> bool:
+    return bool(script_config.get("overwrite", False))
+
+
+def target_folder_from_config(script_config: dict[str, Any], source_folder: Path, change_files_in_place: bool) -> Path:
+    if change_files_in_place:
+        return source_folder
+
+    target_folder = script_config.get("target_folder")
+
+    if target_folder:
+        return Path(str(target_folder))
+
+    return source_folder / "changed_date"
+
+
+def hour_adjustment_from_config(script_config: dict[str, Any]) -> int:
+    return int(script_config.get("hour_adjustment", 0))
+
+
+def read_config_list(script_config: dict[str, Any], name: str) -> list[Any]:
+    value = script_config.get(name, [])
+
+    if not isinstance(value, list):
+        raise TypeError(f"Configuration value 'adjust_file_creation_date.{name}' must be a list")
+
+    if not value:
+        raise ValueError(f"Configuration value 'adjust_file_creation_date.{name}' must define at least one entry")
+
+    return value
+
+
+def get_file_extensions(script_config: dict) -> set[str]:
+    extensions = read_config_list(script_config, "extensions")
+    normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
+
+    if not normalized_extensions:
+        raise ValueError("Configuration value 'adjust_file_creation_date.extensions' must define at least one extension")
+
+    return normalized_extensions
+
+
+def get_patterns(script_config: dict) -> list[re.Pattern]:
+    pattern_configs = read_config_list(script_config, "patterns")
+
+    compiled_patterns: list[re.Pattern] = []
+    for index, pattern_config in enumerate(pattern_configs, start=1):
+        if not isinstance(pattern_config, dict):
+            raise TypeError(f"Pattern entry {index} must be a table with a 'pattern' value")
+
+        pattern_value = pattern_config.get("pattern")
+        if not isinstance(pattern_value, str) or not pattern_value:
+            raise ValueError(f"Pattern entry {index} must define a non-empty 'pattern' string")
+
+        try:
+            compiled_pattern = re.compile(pattern_value, flags=re.IGNORECASE)
+        except re.error as error:
+            raise ValueError(f"Pattern entry {index} has invalid regex syntax: {error}") from error
+
+        group_names = set(compiled_pattern.groupindex)
+        if not ("year" in group_names or "year2" in group_names) or not {"month", "day"}.issubset(group_names):
+            raise ValueError(f"Pattern entry {index} must define named groups year or year2, plus month and day")
+
+        compiled_patterns.append(compiled_pattern)
+
+    return compiled_patterns
+
+
+def device_state_key(path: Path) -> str:
+    return str(path)
+
+
+def cleanup_destination(path: Path) -> None:
+    if path.exists() and path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def datetime_to_filetime(timestamp: datetime) -> tuple[int, int]:
+    utc_timestamp = timestamp.astimezone(timezone.utc)
+    ticks = int((utc_timestamp - WINDOWS_EPOCH).total_seconds() * WINDOWS_TICK)
+    return ticks & 0xFFFFFFFF, ticks >> 32
 
 
 class FileTime(Structure):
-    _fields_ = (
-        ("dwLowDateTime", c_uint32),
-        ("dwHighDateTime", c_uint32),
-    )
-
-
-def datetime_to_filetime(timestamp: datetime) -> FileTime:
-    utc_timestamp = timestamp.astimezone(timezone.utc)
-    ticks = int((utc_timestamp - WINDOWS_EPOCH).total_seconds() * WINDOWS_TICK)
-    return FileTime(ticks & 0xFFFFFFFF, ticks >> 32)
+    _fields_ = (("dwLowDateTime", c_uint32), ("dwHighDateTime", c_uint32))
 
 
 def set_file_times(path: Path, timestamp: datetime) -> None:
-    filetime = datetime_to_filetime(timestamp)
-    handle = kernel32.CreateFileW(
-        str(path),
-        0x0100,
-        0x00000001 | 0x00000002 | 0x00000004,
-        None,
-        3,
-        0x02000000,
-        None,
-    )
+    low_date_time, high_date_time = datetime_to_filetime(timestamp)
+    filetime = FileTime(low_date_time, high_date_time)
+    handle = kernel32.CreateFileW(str(path), 0x0100, 0x00000001 | 0x00000002 | 0x00000004, None, 3, 0x02000000, None)
 
     if handle == INVALID_HANDLE_VALUE:
         raise OSError(f"Could not open file for timestamp update: {path}")
@@ -223,10 +309,7 @@ def parse_timestamp(path: Path, patterns: list[re.Pattern], hour_adjustment: int
         if year is None or month is None or day is None:
             raise ValueError(f"Pattern must provide year/year2, month, and day groups: {pattern.pattern}")
 
-        timestamp = datetime.strptime(
-            f"{year}{month}{day}{hour}{minute}{second}",
-            "%Y%m%d%H%M%S",
-        ).astimezone()
+        timestamp = datetime.strptime(f"{year}{month}{day}{hour}{minute}{second}", "%Y%m%d%H%M%S").astimezone()
 
         if hour_adjustment:
             timestamp += timedelta(hours=hour_adjustment)
@@ -255,13 +338,7 @@ def collision_safe_path(path: Path) -> Path:
         counter += 1
 
 
-def prepare_destination(
-    source_file: Path,
-    *,
-    change_files_in_place: bool,
-    target_folder: Path,
-    overwrite: bool,
-) -> Path | None:
+def prepare_destination(source_file: Path, *, change_files_in_place: bool, target_folder: Path, overwrite: bool) -> Path | None:
     if change_files_in_place:
         return source_file
 
@@ -278,74 +355,14 @@ def prepare_destination(
     return destination
 
 
-def get_file_extensions(script_config: dict) -> set[str]:
-    extensions = script_config.get("extensions", [])
-
-    if not isinstance(extensions, list):
-        raise TypeError("Configuration value 'adjust_file_creation_date.extensions' must be a list")
-
-    normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
-
-    if not normalized_extensions:
-        raise ValueError("Configuration value 'adjust_file_creation_date.extensions' must define at least one extension")
-
-    return normalized_extensions
-
-
-def get_patterns(script_config: dict) -> list[re.Pattern]:
-    pattern_configs = script_config.get("patterns", [])
-
-    if not isinstance(pattern_configs, list):
-        raise TypeError("Configuration value 'adjust_file_creation_date.patterns' must be a list")
-
-    if not pattern_configs:
-        raise ValueError("Configuration value 'adjust_file_creation_date.patterns' must define at least one pattern")
-
-    compiled_patterns: list[re.Pattern] = []
-    for index, pattern_config in enumerate(pattern_configs, start=1):
-        if not isinstance(pattern_config, dict):
-            raise TypeError(f"Pattern entry {index} must be a table with a 'pattern' value")
-
-        pattern_value = pattern_config.get("pattern")
-        if not isinstance(pattern_value, str) or not pattern_value:
-            raise ValueError(f"Pattern entry {index} must define a non-empty 'pattern' string")
-
-        try:
-            compiled_pattern = re.compile(pattern_value, flags=re.IGNORECASE)
-        except re.error as error:
-            raise ValueError(f"Pattern entry {index} has invalid regex syntax: {error}") from error
-
-        group_names = set(compiled_pattern.groupindex)
-        if not ({"year", "year2"} & group_names) or not {"month", "day"}.issubset(group_names):
-            raise ValueError(
-                f"Pattern entry {index} must define named groups year or year2, plus month and day"
-            )
-
-        compiled_patterns.append(compiled_pattern)
-
-    return compiled_patterns
-
-
-def get_target_folder(script_config: dict, source_folder: Path, change_files_in_place: bool) -> Path:
-    if change_files_in_place:
-        return source_folder
-
-    target_folder = script_config.get("target_folder")
-
-    if target_folder:
-        return Path(str(target_folder))
-
-    return source_folder / "changed_date"
-
-
 def adjust_file_creation_dates(script_config: dict) -> list[FileAdjustmentResult]:
-    source_folder = Path(str(script_config["source_folder"]))
-    change_files_in_place = bool(script_config.get("change_files_in_place", True))
-    overwrite = bool(script_config.get("overwrite", False))
-    target_folder = get_target_folder(script_config, source_folder, change_files_in_place)
+    source_folder = source_folder_from_config(script_config)
+    change_files_in_place = change_files_in_place_from_config(script_config)
+    overwrite = overwrite_from_config(script_config)
+    target_folder = target_folder_from_config(script_config, source_folder, change_files_in_place)
     extensions = get_file_extensions(script_config)
     patterns = get_patterns(script_config)
-    hour_adjustment = int(script_config.get("hour_adjustment", 0))
+    hour_adjustment = hour_adjustment_from_config(script_config)
 
     results: list[FileAdjustmentResult] = []
     prepare_target_folder(change_files_in_place, target_folder)
@@ -353,10 +370,7 @@ def adjust_file_creation_dates(script_config: dict) -> list[FileAdjustmentResult
     visual.print_info(f"Adjusting file creation dates in {source_folder}", emoji="archive")
 
     for source_file in source_folder.iterdir():
-        if not source_file.is_file():
-            continue
-
-        if source_file.suffix.lower() not in extensions:
+        if not source_file.is_file() or source_file.suffix.lower() not in extensions:
             continue
 
         try:
@@ -388,13 +402,23 @@ def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
     changed_count = sum(1 for result in results if result.changed)
 
     visual.print_info(
-        f"File creation date adjustment summary: {changed_count} updated, "
-        f"{len(failed_results)} failed, {len(results)} matched file(s)",
+        f"File creation date adjustment summary: {changed_count} updated, {len(failed_results)} failed, {len(results)} matched file(s)",
         emoji="list",
     )
 
     for result in failed_results:
         visual.print_error(f"Failed timestamp update: {result.source}: {result.error}")
+
+
+def store_prompted_smb_password(config: dict, password: str) -> None:
+    config_path = config.get("__config_path__")
+
+    if config_path is None:
+        raise ValueError("Loaded configuration is missing internal '__config_path__'")
+
+    replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
+    remove_value(config_path, "smb", "password_file")
+    remove_value(config_path, "smb", "password")
 
 
 def ensure_section(config: dict) -> dict:
@@ -403,7 +427,7 @@ def ensure_section(config: dict) -> dict:
         visual.print_warning("Added default 'adjust_file_creation_date' section to config.yaml. Please configure it before running.")
         raise SystemExit(1)
 
-    return get_table(config, "adjust_file_creation_date")
+    return get_config_section(config)
 
 
 def config_for_adjust_smb(config: dict, script_config: dict) -> dict:
