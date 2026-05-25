@@ -4,10 +4,11 @@ from ctypes import Structure, WinDLL, byref, c_bool, c_uint32, c_void_p, c_wchar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from winutils_python import config as config_loader
+import config_support as config_loader
 from winutils_python import connect_smb, visual
 
 DEFAULT_SECTION = r'''adjust_file_creation_date:
+  smb: false
   source_folder: 'R:\path\to\files'
   target_folder: 'C:\path\to\target'
   extensions:
@@ -35,6 +36,16 @@ kernel32.SetFileTime.argtypes = (c_void_p, c_void_p, c_void_p, c_void_p)
 kernel32.SetFileTime.restype = c_bool
 kernel32.CloseHandle.argtypes = (c_void_p,)
 kernel32.CloseHandle.restype = c_bool
+
+
+def store_prompted_smb_password(config: dict, password: str) -> None:
+    config_path = config.get("__config_path__")
+    if config_path is None:
+        raise ValueError("Loaded configuration is missing internal '__config_path__'")
+
+    config_loader.replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
+    config_loader.remove_value(config_path, "smb", "password_file")
+    config_loader.remove_value(config_path, "smb", "password")
 
 
 class FileTime(Structure):
@@ -211,12 +222,30 @@ def ensure_section(config: dict) -> dict:
     return config_loader.get_table(config, "adjust_file_creation_date")
 
 
+def config_for_adjust_smb(config: dict, script_config: dict) -> dict:
+    adjust_smb = script_config.get("smb", False)
+
+    if not isinstance(adjust_smb, bool):
+        raise TypeError("Configuration value 'adjust_file_creation_date.smb' must be true or false")
+
+    scoped_config = dict(config)
+
+    if adjust_smb:
+        return scoped_config
+
+    scoped_config.pop("smb", None)
+    return scoped_config
+
+
 def main() -> None:
     config = config_loader.load(__file__)
     script_config = ensure_section(config)
 
     visual.print_start("Starting file creation date adjustment")
-    connect_smb.connect_from_config(config)
+    connect_smb.connect_from_config(
+        config_for_adjust_smb(config, script_config),
+        on_password_prompted=lambda password: store_prompted_smb_password(config, password),
+    )
 
     changed_count = adjust_file_creation_dates(script_config)
     visual.print_done(f"File creation date adjustment finished: {changed_count} file(s) updated")
