@@ -8,13 +8,17 @@ import yaml
 from winutils_python import visual
 
 
-def app_dir(script_file: str | Path) -> Path:
-    """Return the directory that should contain config.yaml.
+DEFAULT_SECTION = r'''ssh:
+  example_set:
+    user: 'user'
+    host: '192.168.1.1'
+    port: 22
+    timeout: 300
+    command: 'ls'
+'''
 
-    In a normal Python run this is the script directory.
-    In a PyInstaller .exe this is the .exe directory, not the temporary
-    extraction directory used by --onefile builds.
-    """
+
+def app_dir(script_file: str | Path) -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
 
@@ -22,7 +26,6 @@ def app_dir(script_file: str | Path) -> Path:
 
 
 def script_dir(script_file: str | Path) -> Path:
-    # Backwards-compatible name used by the rest of the script.
     return app_dir(script_file)
 
 
@@ -83,7 +86,7 @@ def parse_yaml(config_text: str) -> dict[str, Any]:
 
 
 def dump_yaml(config: dict[str, Any]) -> str:
-    clean = {k: v for k, v in config.items() if not k.startswith("__")}
+    clean = {key: value for key, value in config.items() if not key.startswith("__")}
     return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
 
 
@@ -94,16 +97,6 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
         raise TypeError(f"Configuration value '{name}' must be a table")
 
     return value
-
-
-DEFAULT_SECTION = r'''ssh:
-  example_set:
-    user: 'user'
-    host: '192.168.1.1'
-    port: 22
-    timeout: 300
-    command: 'ls'
-'''
 
 
 def normalize_set_name(set_name: str) -> str:

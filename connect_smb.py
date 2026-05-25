@@ -7,13 +7,19 @@ import yaml
 from winutils_python import connect_smb, visual
 
 
-def script_dir(script_file: str | Path) -> Path:
-    """Return the directory that should contain config.yaml.
+DEFAULT_SECTION = r'''smb:
+  user: 'DOMAIN\user'
+  mappings:
+    - drive: 'Q:'
+      share: '\\SERVER\backup'
+    - drive: 'R:'
+      share: '\\SERVER\data'
+    - drive: 'S:'
+      share: '\\SERVER\develop'
+'''
 
-    In a normal Python run this is the script directory.
-    In a PyInstaller .exe this is the .exe directory, not the temporary
-    extraction directory used by --onefile builds.
-    """
+
+def script_dir(script_file: str | Path) -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
 
@@ -88,21 +94,6 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
         raise TypeError(f"Configuration value '{name}' must be a table")
 
     return value
-
-
-
-DEFAULT_SECTION = r'''smb:
-  # Set this to the Windows/SMB account used for the mappings below.
-  # Examples: 'DOMAIN\user', 'SERVER\user' or '.\local_user'
-  user: 'DOMAIN\user'
-  mappings:
-    - drive: 'Q:'
-      share: '\\SERVER\backup'
-    - drive: 'R:'
-      share: '\\SERVER\data'
-    - drive: 'S:'
-      share: '\\SERVER\develop'
-'''
 
 
 def ensure_section(config: dict) -> None:

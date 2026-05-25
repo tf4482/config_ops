@@ -21,24 +21,30 @@ def app_dir(script_file: str | Path) -> Path:
 
 
 def script_dir(script_file: str | Path) -> Path:
-    # Backwards-compatible name used by the rest of the script.
     return app_dir(script_file)
+
 
 def config_path(script_file: str | Path) -> Path:
     return script_dir(script_file) / "config.yaml"
 
+
 def find_config_path(script_file: str | Path) -> Path:
     path = config_path(script_file)
+
     if not path.exists():
         path.write_text("", encoding="utf-8")
+
     return path
+
 
 def parse_yaml(config_text: str) -> dict[str, Any]:
     return yaml.safe_load(config_text) or {}
 
+
 def dump_yaml(config: dict[str, Any]) -> str:
-    clean = {k: v for k, v in config.items() if not k.startswith("__")}
+    clean = {key: value for key, value in config.items() if not key.startswith("__")}
     return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
+
 
 def load(script_file: str | Path) -> dict[str, Any]:
     path = find_config_path(script_file)
@@ -46,18 +52,24 @@ def load(script_file: str | Path) -> dict[str, Any]:
     loaded_config["__config_path__"] = path
     return loaded_config
 
+
 def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
     path = config.get("__config_path__")
+
     if isinstance(path, Path):
         existing = path.read_text(encoding="utf-8").rstrip()
         separator = "\n\n" if existing else ""
         path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
 
+
 def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
     value = config.get(name, {})
+
     if not isinstance(value, dict):
         raise TypeError(f"Configuration value '{name}' must be a table")
+
     return value
+
 
 class config_loader:
     load = staticmethod(load)
