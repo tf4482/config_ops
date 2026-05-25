@@ -18,6 +18,17 @@ In the future, Config Ops may help with:
 - [`file_operations.pyw`](file_operations.pyw) runs configured file operation sets.
 - [`winutils_python`](winutils_python/README.md) provides the reusable Windows helper modules.
 
+## 📦 Project packaging
+
+`config_ops` is an application-style `uv` project. The reusable Windows helper package is kept as the Git submodule `winutils_python` and is declared as an editable local dependency in `pyproject.toml`.
+
+After cloning, initialize the submodule and sync dependencies:
+
+```powershell
+git submodule update --init --recursive
+uv sync
+```
+
 ## 💾 File operations
 
 `file_operations.pyw` can run named operation sets from `config.yaml`.
