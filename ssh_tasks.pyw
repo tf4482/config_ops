@@ -12,6 +12,7 @@ DEFAULT_SECTION = r'''ssh:
     user: 'user'
     host: '192.168.1.1'
     port: 22
+    timeout: 300
     command: 'ls'
 '''
 
@@ -141,13 +142,41 @@ def required_str(config: dict, key: str) -> str:
 
 def required_port(config: dict) -> int:
     value = config.get("port")
+    port: int
+
     if isinstance(value, int):
-        return value
+        port = value
+    elif isinstance(value, str) and value.isdigit():
+        port = int(value)
+    else:
+        raise ValueError("SSH config value 'port' must be an integer")
 
-    if isinstance(value, str) and value.isdigit():
-        return int(value)
+    if not 1 <= port <= 65535:
+        raise ValueError("SSH config value 'port' must be in range 1..65535")
 
-    raise ValueError("SSH config value 'port' must be an integer")
+    return port
+
+
+def optional_timeout(config: dict) -> float | None:
+    value = config.get("timeout")
+
+    if value is None:
+        return None
+
+    if isinstance(value, int | float):
+        timeout = float(value)
+    elif isinstance(value, str):
+        try:
+            timeout = float(value)
+        except ValueError as error:
+            raise ValueError("SSH config value 'timeout' must be a positive number") from error
+    else:
+        raise ValueError("SSH config value 'timeout' must be a positive number")
+
+    if timeout <= 0:
+        raise ValueError("SSH config value 'timeout' must be greater than 0")
+
+    return timeout
 
 
 def ensure_section(config: dict) -> None:
@@ -166,12 +195,14 @@ def main() -> None:
     user = required_str(ssh_cfg, "user")
     host = required_str(ssh_cfg, "host")
     port = required_port(ssh_cfg)
+    timeout = optional_timeout(ssh_cfg)
     command = required_str(ssh_cfg, "command")
 
     visual.print_start(f"Starting SSH task: {set_name}")
     subprocess.run(
         ["ssh", f"{user}@{host}", "-p", str(port), command],
         check=True,
+        timeout=timeout,
     )
     visual.print_done(f"SSH task finished: {set_name}")
 
