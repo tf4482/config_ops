@@ -7,19 +7,20 @@ from typing import Any
 
 import yaml
 
-from winutils_python import connect_smb, visual
+from winutils_python import connect_smb, menu, visual
 
 DEFAULT_SECTION = r'''archive_media:
-  smb: false
-  extensions:
-    - .jpg
-    - .jpeg
-    - .png
-    - .gif
-    - .bmp
-  tasks:
-    - source: 'R:\path\to\source'
-      target: 'R:\path\to\target'
+  example_set:
+    smb: false
+    extensions:
+      - .jpg
+      - .jpeg
+      - .png
+      - .gif
+      - .bmp
+    tasks:
+      - source: 'R:\path\to\source'
+        target: 'R:\path\to\target'
 '''
 
 
@@ -143,6 +144,42 @@ def store_prompted_smb_password(config: dict, password: str) -> None:
     remove_value(config_path, "smb", "password")
 
 
+def validate_archive_set_name(config: dict, set_name: str) -> str:
+    archive_sets = get_table(config, "archive_media")
+
+    if set_name not in archive_sets:
+        available_sets = ", ".join(archive_sets) or "none"
+        raise SystemExit(f"Unknown archive media set '{set_name}'. Available sets: {available_sets}")
+
+    return set_name
+
+
+def archive_set_config(config: dict, set_name: str) -> dict:
+    archive_sets = get_table(config, "archive_media")
+    archive_set = archive_sets.get(set_name)
+
+    if not isinstance(archive_set, dict):
+        raise TypeError(f"Archive media set '{set_name}' must be a table")
+
+    return archive_set
+
+
+def choose_archive_set_terminal(config: dict) -> str:
+    archive_sets = get_table(config, "archive_media")
+    return menu.choose_mapping_key_terminal(
+        archive_sets,
+        header="Available archive media sets:",
+        empty_message="No archive media sets configured in config.yaml. Please add an 'archive_media' section.",
+    )
+
+
+def archive_set_name(config: dict) -> str:
+    if len(sys.argv) > 1:
+        return validate_archive_set_name(config, menu.normalize_selection_name(sys.argv[1]))
+
+    return choose_archive_set_terminal(config)
+
+
 def get_creation_time(path: Path) -> datetime:
     stat_result = path.stat()
 
@@ -197,10 +234,15 @@ def move_media_to_dated_archive(source: Path, target: Path, extensions: set[str]
     return moved_count
 
 
-def get_archive_tasks(script_config: dict) -> tuple[tuple[Path, Path], ...]:
+def get_archive_tasks(script_config: dict, set_name: str) -> tuple[tuple[Path, Path], ...]:
+    tasks = script_config.get("tasks", [])
+
+    if not isinstance(tasks, list):
+        raise TypeError(f"Configuration value 'archive_media.{set_name}.tasks' must be a list")
+
     return tuple(
         (Path(str(task["source"])), Path(str(task["target"])))
-        for task in script_config.get("tasks", [])
+        for task in tasks
     )
 
 
@@ -212,34 +254,34 @@ def validate_archive_source(source: Path) -> None:
         raise NotADirectoryError(f"Archive source is not a directory: {source}")
 
 
-def get_media_extensions(script_config: dict) -> set[str]:
+def get_media_extensions(script_config: dict, set_name: str) -> set[str]:
     extensions = script_config.get("extensions", [])
 
     if not isinstance(extensions, list):
-        raise TypeError("Configuration value 'archive_media.extensions' must be a list")
+        raise TypeError(f"Configuration value 'archive_media.{set_name}.extensions' must be a list")
 
     normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
 
     if not normalized_extensions:
-        raise ValueError("Configuration value 'archive_media.extensions' must define at least one extension")
+        raise ValueError(f"Configuration value 'archive_media.{set_name}.extensions' must define at least one extension")
 
     return normalized_extensions
 
 
-def ensure_section(config: dict) -> dict:
+def ensure_section(config: dict) -> None:
     if "archive_media" not in config:
         append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning("Added default 'archive_media' section to config.yaml. Please configure it before running.")
         raise SystemExit(1)
 
-    return get_table(config, "archive_media")
+    get_table(config, "archive_media")
 
 
-def config_for_archive_smb(config: dict, script_config: dict) -> dict:
+def config_for_archive_smb(config: dict, script_config: dict, set_name: str) -> dict:
     archive_smb = script_config.get("smb", False)
 
     if not isinstance(archive_smb, bool):
-        raise TypeError("Configuration value 'archive_media.smb' must be true or false")
+        raise TypeError(f"Configuration value 'archive_media.{set_name}.smb' must be true or false")
 
     scoped_config = dict(config)
 
@@ -281,23 +323,25 @@ def summarize_archive_results(results: list[ArchiveTaskResult]) -> None:
 
 def main() -> None:
     config = load_config(__file__)
-    script_config = ensure_section(config)
+    ensure_section(config)
+    set_name = archive_set_name(config)
+    script_config = archive_set_config(config, set_name)
 
-    visual.print_start("Starting media archive")
+    visual.print_start(f"Starting media archive: {set_name}")
     connect_smb.connect_from_config(
-        config_for_archive_smb(config, script_config),
+        config_for_archive_smb(config, script_config, set_name),
         on_password_prompted=lambda password: store_prompted_smb_password(config, password),
     )
 
-    extensions = get_media_extensions(script_config)
-    results = run_archive_tasks(get_archive_tasks(script_config), extensions)
+    extensions = get_media_extensions(script_config, set_name)
+    results = run_archive_tasks(get_archive_tasks(script_config, set_name), extensions)
     summarize_archive_results(results)
 
     if any(result.failed for result in results):
         raise ArchiveMediaError(results)
 
     total_moved = sum(result.moved_count for result in results)
-    visual.print_done(f"Media archive finished: {total_moved} file(s) moved")
+    visual.print_done(f"Media archive finished: {set_name}: {total_moved} file(s) moved")
 
 
 if __name__ == "__main__":
