@@ -7,6 +7,7 @@ from winutils_python import connect_smb, file_ops, visual
 
 DEFAULT_SECTION = r'''file_operations:
   example_set:
+    smb: false
     robocopy:
       common_options: ['/MT:32', '/W:2', '/R:10', '/XJD', '/XJF', '/XJ', '/XC', '/ETA', '/TEE']
     mirror:
@@ -38,6 +39,16 @@ def validate_operation_set_name(config: dict, set_name: str) -> str:
         raise SystemExit(f"Unknown file operation set '{set_name}'. Available sets: {available_sets}")
 
     return set_name
+
+
+def operation_set_config(config: dict, set_name: str) -> dict:
+    operation_sets = config_loader.get_table(config, "file_operations")
+    operation_set = operation_sets.get(set_name)
+
+    if not isinstance(operation_set, dict):
+        raise TypeError(f"File operation set '{set_name}' must be a table")
+
+    return operation_set
 
 
 def choose_operation_set(config: dict) -> str:
@@ -133,13 +144,37 @@ def ensure_section(config: dict) -> None:
         raise SystemExit(1)
 
 
+def config_for_operation_set_smb(config: dict, set_name: str) -> dict:
+    operation_set = operation_set_config(config, set_name)
+    set_smb = operation_set.get("smb", False)
+
+    scoped_config = dict(config)
+
+    if set_smb is True:
+        if "smb" in config:
+            return scoped_config
+
+        scoped_config.pop("smb", None)
+        return scoped_config
+
+    if set_smb in (False, None):
+        scoped_config.pop("smb", None)
+        return scoped_config
+
+    if isinstance(set_smb, dict):
+        scoped_config["smb"] = set_smb
+        return scoped_config
+
+    raise TypeError(f"File operation set '{set_name}' value 'smb' must be true, false or a table")
+
+
 def main() -> None:
     config = config_loader.load(__file__)
     ensure_section(config)
     set_name = operation_set_name(config)
 
     visual.print_start(f"Starting file operations: {set_name}")
-    connect_smb.connect_from_config(config)
+    connect_smb.connect_from_config(config_for_operation_set_smb(config, set_name))
     file_ops.run_operation_set(config, set_name)
     visual.print_done(f"File operations finished: {set_name}")
 
