@@ -61,6 +61,14 @@ uv run python archive_media.pyw
 
 The `archive_media.smb` value controls whether top-level SMB mappings are connected before archiving.
 
+Archive behavior:
+
+- `archive_media.extensions` must be a non-empty list.
+- Each configured task source must exist and must be a directory.
+- Files are moved into `target/YYYY/MM/DD/filename` folders.
+- If one task fails, later tasks still run.
+- After all tasks finish, failures are summarized and reported as a process error.
+
 ## 🔌 SMB connections
 
 `connect_smb.pyw` connects the top-level `smb` mappings from `config.yaml` without running any file operations:
