@@ -5,7 +5,6 @@ from tkinter import messagebox
 from winutils_python import config as config_loader
 from winutils_python import connect_smb, file_ops, visual
 
-
 DEFAULT_SECTION = r'''file_operations:
   example_set:
     mirror:
@@ -26,6 +25,16 @@ DEFAULT_SECTION = r'''file_operations:
 
 def normalize_set_name(set_name: str) -> str:
     return set_name.lstrip("/-")
+
+
+def validate_operation_set_name(config: dict, set_name: str) -> str:
+    operation_sets = config_loader.get_table(config, "file_operations")
+
+    if set_name not in operation_sets:
+        available_sets = ", ".join(operation_sets) or "none"
+        raise SystemExit(f"Unknown file operation set '{set_name}'. Available sets: {available_sets}")
+
+    return set_name
 
 
 def choose_operation_set(config: dict) -> str:
@@ -106,7 +115,7 @@ def choose_operation_set_terminal(config: dict) -> str:
 
 def operation_set_name(config: dict) -> str:
     if len(sys.argv) > 1:
-        return normalize_set_name(sys.argv[1])
+        return validate_operation_set_name(config, normalize_set_name(sys.argv[1]))
 
     if visual.is_terminal():
         return choose_operation_set_terminal(config)
