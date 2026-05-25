@@ -34,12 +34,6 @@ class PeripheralDevice:
 
 
 def app_dir(script_file: str | Path) -> Path:
-    """Return the directory that should contain config.yaml.
-
-    In a normal Python run this is the script directory.
-    In a PyInstaller .exe this is the .exe directory, not the temporary
-    extraction directory used by --onefile builds.
-    """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
 
@@ -47,7 +41,6 @@ def app_dir(script_file: str | Path) -> Path:
 
 
 def script_dir(script_file: str | Path) -> Path:
-    # Backwards-compatible name used by the rest of the script.
     return app_dir(script_file)
 
 

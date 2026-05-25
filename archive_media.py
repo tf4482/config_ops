@@ -37,7 +37,6 @@ def app_dir(script_file: str | Path) -> Path:
 
 
 def script_dir(script_file: str | Path) -> Path:
-    # Backwards-compatible name used by the rest of the script.
     return app_dir(script_file)
 
 
@@ -169,8 +168,6 @@ def move_media_to_dated_archive(source: Path, target: Path, extensions: set[str]
     validate_archive_source(source)
 
     moved_count = 0
-    if visual.is_terminal():
-        print(flush=True)
 
     visual.print_info(f"Archiving media: {source} → {target}", emoji="archive")
 
