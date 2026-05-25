@@ -25,10 +25,10 @@ def ensure_section(config: dict) -> None:
 def main() -> None:
     config = config_loader.load(__file__)
     ensure_section(config)
-    connected = connect_smb.connect_from_config(config)
+    results = connect_smb.connect_from_config(config)
 
-    if connected:
-        visual.print_done("SMB shares connected")
+    if results:
+        visual.print_done(f"SMB shares connected: {len(results)} mapping(s)")
     else:
         visual.print_warning("No SMB shares connected")
 
