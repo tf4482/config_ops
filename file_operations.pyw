@@ -148,6 +148,9 @@ def config_for_operation_set_smb(config: dict, set_name: str) -> dict:
     operation_set = operation_set_config(config, set_name)
     set_smb = operation_set.get("smb", False)
 
+    if not isinstance(set_smb, bool):
+        raise TypeError(f"File operation set '{set_name}' value 'smb' must be true or false")
+
     scoped_config = dict(config)
 
     if set_smb is True:
@@ -161,22 +164,12 @@ def config_for_operation_set_smb(config: dict, set_name: str) -> dict:
         scoped_config.pop("smb", None)
         return scoped_config
 
-    if isinstance(set_smb, dict):
-        scoped_config["smb"] = set_smb
-        return scoped_config
-
-    raise TypeError(f"File operation set '{set_name}' value 'smb' must be true, false or a table")
+    return scoped_config
 
 
 def store_prompted_smb_password(config: dict, set_name: str, password: str) -> None:
     operation_set = operation_set_config(config, set_name)
     set_smb = operation_set.get("smb", False)
-
-    if isinstance(set_smb, dict):
-        set_smb["encrypted_password"] = connect_smb.encrypt_password(password)
-        set_smb.pop("password_file", None)
-        set_smb.pop("password", None)
-        return
 
     if set_smb is True:
         config_path = config.get("__config_path__")
