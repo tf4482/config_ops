@@ -52,6 +52,8 @@ def remove_destination_if_exists(destination: Path) -> None:
 
 
 def move_media_to_dated_archive(source: Path, target: Path, extensions: set[str]) -> int:
+    validate_archive_source(source)
+
     moved_count = 0
     if visual.is_terminal():
         print(flush=True)
@@ -91,13 +93,26 @@ def get_archive_tasks(script_config: dict) -> tuple[tuple[Path, Path], ...]:
     )
 
 
+def validate_archive_source(source: Path) -> None:
+    if not source.exists():
+        raise FileNotFoundError(f"Archive source does not exist: {source}")
+
+    if not source.is_dir():
+        raise NotADirectoryError(f"Archive source is not a directory: {source}")
+
+
 def get_media_extensions(script_config: dict) -> set[str]:
     extensions = script_config.get("extensions", [])
 
     if not isinstance(extensions, list):
         raise TypeError("Configuration value 'archive_media.extensions' must be a list")
 
-    return {str(extension).lower() for extension in extensions}
+    normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
+
+    if not normalized_extensions:
+        raise ValueError("Configuration value 'archive_media.extensions' must define at least one extension")
+
+    return normalized_extensions
 
 
 def ensure_section(config: dict) -> dict:
