@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import config_support
+import yaml
+
 from winutils_python import visual
 
 VALID_COMMANDS = {"on", "off", "toggle", "suspend", "resume"}
@@ -35,8 +36,130 @@ class PeripheralDevice:
     off_url: str
 
 
-def script_dir() -> Path:
-    return Path(__file__).resolve().parent
+def app_dir(script_file: str | Path) -> Path:
+    """Return the directory that should contain config.yaml.
+
+    In a normal Python run this is the script directory.
+    In a PyInstaller .exe this is the .exe directory, not the temporary
+    extraction directory used by --onefile builds.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    return Path(script_file).resolve().parent
+
+
+def script_dir(script_file: str | Path) -> Path:
+    # Backwards-compatible name used by the rest of the script.
+    return app_dir(script_file)
+
+
+def config_path(script_file: str | Path) -> Path:
+    return script_dir(script_file) / "config.yaml"
+
+
+def find_config_path(script_file: str | Path) -> Path:
+    path = config_path(script_file)
+
+    if not path.exists():
+        path.write_text("", encoding="utf-8")
+
+    return path
+
+
+def parse_yaml(config_text: str) -> dict[str, Any]:
+    return yaml.safe_load(config_text) or {}
+
+
+def dump_yaml(config: dict[str, Any]) -> str:
+    clean = {
+        key: value
+        for key, value in config.items()
+        if not key.startswith("__")
+    }
+
+    return yaml.safe_dump(
+        clean,
+        sort_keys=False,
+        allow_unicode=True,
+    )
+
+
+def load_config(script_file: str | Path) -> dict[str, Any]:
+    path = find_config_path(script_file)
+    loaded_config = parse_yaml(
+        path.read_text(encoding="utf-8")
+    )
+
+    loaded_config["__config_path__"] = path
+
+    return loaded_config
+
+
+def append_section_yaml(
+    config: dict[str, Any],
+    section_yaml: str,
+) -> None:
+    path = config.get("__config_path__")
+
+    if not isinstance(path, Path):
+        return
+
+    existing = path.read_text(
+        encoding="utf-8",
+    ).rstrip()
+
+    separator = "\n\n" if existing else ""
+
+    path.write_text(
+        existing + separator + section_yaml.strip() + "\n",
+        encoding="utf-8",
+    )
+
+
+def replace_or_add_string_value(
+    path: Path,
+    table: str,
+    key: str,
+    value: str,
+) -> None:
+    loaded_config = parse_yaml(
+        path.read_text(encoding="utf-8")
+    )
+
+    table_config = loaded_config.setdefault(table, {})
+
+    if not isinstance(table_config, dict):
+        raise TypeError(
+            f"Configuration value '{table}' must be a table"
+        )
+
+    table_config[key] = value
+
+    path.write_text(
+        dump_yaml(loaded_config),
+        encoding="utf-8",
+    )
+
+
+def remove_value(
+    path: Path,
+    table: str,
+    key: str,
+) -> None:
+    loaded_config = parse_yaml(
+        path.read_text(encoding="utf-8")
+    )
+
+    table_config = loaded_config.get(table, {})
+
+    if isinstance(table_config, dict) and key in table_config:
+        del table_config[key]
+
+        path.write_text(
+            dump_yaml(loaded_config),
+            encoding="utf-8",
+        )
 
 
 def normalize_argument(argument: str) -> str:
@@ -45,7 +168,7 @@ def normalize_argument(argument: str) -> str:
 
 def ensure_section(config: dict[str, Any]) -> None:
     if "peripherals" not in config:
-        config_support.append_section_yaml(config, DEFAULT_SECTION)
+        append_section_yaml(config, DEFAULT_SECTION)
 
         visual.print_warning(
             "Added default 'peripherals' section to config.yaml. "
@@ -325,7 +448,7 @@ def parse_arguments(
 
 
 def main() -> None:
-    config = config_support.load(__file__)
+    config = load_config(__file__)
 
     ensure_section(config)
 
