@@ -9,6 +9,8 @@ import yaml
 
 from winutils_python import connect_smb, menu, visual
 
+CONFIG_SECTION = "archive_media"
+
 DEFAULT_SECTION = r'''archive_media:
   example_set:
     smb: false
@@ -67,10 +69,13 @@ def load_config(script_file: str | Path) -> dict[str, Any]:
 
 def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
     path = config.get("__config_path__")
-    if isinstance(path, Path):
-        existing = path.read_text(encoding="utf-8").rstrip()
-        separator = "\n\n" if existing else ""
-        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
+
+    if not isinstance(path, Path):
+        return
+
+    existing = path.read_text(encoding="utf-8").rstrip()
+    separator = "\n\n" if existing else ""
+    path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
 
 
 def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
@@ -98,7 +103,7 @@ def parse_yaml(config_text: str) -> dict[str, Any]:
 
 
 def dump_yaml(config: dict[str, Any]) -> str:
-    clean = {k: v for k, v in config.items() if not k.startswith("__")}
+    clean = {key: value for key, value in config.items() if not key.startswith("__")}
     return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
 
 
@@ -109,6 +114,14 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
         raise TypeError(f"Configuration value '{name}' must be a table")
 
     return value
+
+
+def config_key(set_name: str, name: str) -> str:
+    return f"{CONFIG_SECTION}.{set_name}.{name}"
+
+
+def get_archive_sets(config: dict[str, Any]) -> dict[str, Any]:
+    return get_table(config, CONFIG_SECTION)
 
 
 @dataclass(frozen=True)
@@ -134,18 +147,23 @@ class ArchiveMediaError(RuntimeError):
         super().__init__(f"{len(failed_results)} archive media task(s) failed: {summary}")
 
 
-def store_prompted_smb_password(config: dict, password: str) -> None:
+def store_prompted_smb_password(config: dict[str, Any], password: str) -> None:
     config_path = config.get("__config_path__")
     if config_path is None:
         raise ValueError("Loaded configuration is missing internal '__config_path__'")
 
-    replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
+    replace_or_add_string_value(
+        config_path,
+        "smb",
+        "encrypted_password",
+        connect_smb.encrypt_password(password),
+    )
     remove_value(config_path, "smb", "password_file")
     remove_value(config_path, "smb", "password")
 
 
-def validate_archive_set_name(config: dict, set_name: str) -> str:
-    archive_sets = get_table(config, "archive_media")
+def validate_archive_set_name(config: dict[str, Any], set_name: str) -> str:
+    archive_sets = get_archive_sets(config)
 
     if set_name not in archive_sets:
         available_sets = ", ".join(archive_sets) or "none"
@@ -154,8 +172,8 @@ def validate_archive_set_name(config: dict, set_name: str) -> str:
     return set_name
 
 
-def archive_set_config(config: dict, set_name: str) -> dict:
-    archive_sets = get_table(config, "archive_media")
+def archive_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any]:
+    archive_sets = get_archive_sets(config)
     archive_set = archive_sets.get(set_name)
 
     if not isinstance(archive_set, dict):
@@ -164,16 +182,16 @@ def archive_set_config(config: dict, set_name: str) -> dict:
     return archive_set
 
 
-def choose_archive_set_terminal(config: dict) -> str:
-    archive_sets = get_table(config, "archive_media")
+def choose_archive_set_terminal(config: dict[str, Any]) -> str:
+    archive_sets = get_archive_sets(config)
     return menu.choose_mapping_key_terminal(
         archive_sets,
         header="Available archive media sets:",
-        empty_message="No archive media sets configured in config.yaml. Please add an 'archive_media' section.",
+        empty_message=f"No archive media sets configured in config.yaml. Please add an '{CONFIG_SECTION}' section.",
     )
 
 
-def archive_set_name(config: dict) -> str:
+def archive_set_name(config: dict[str, Any]) -> str:
     if len(sys.argv) > 1:
         return validate_archive_set_name(config, menu.normalize_selection_name(sys.argv[1]))
 
@@ -216,12 +234,7 @@ def move_media_to_dated_archive(source: Path, target: Path, extensions: set[str]
             continue
 
         creation_date = get_creation_time(current_path)
-        target_year_month_day = (
-            target
-            / creation_date.strftime("%Y")
-            / creation_date.strftime("%m")
-            / creation_date.strftime("%d")
-        )
+        target_year_month_day = dated_archive_folder(target, creation_date)
         target_year_month_day.mkdir(parents=True, exist_ok=True)
 
         destination = target_year_month_day / current_path.name
@@ -234,16 +247,17 @@ def move_media_to_dated_archive(source: Path, target: Path, extensions: set[str]
     return moved_count
 
 
-def get_archive_tasks(script_config: dict, set_name: str) -> tuple[tuple[Path, Path], ...]:
+def dated_archive_folder(target: Path, creation_date: datetime) -> Path:
+    return target / creation_date.strftime("%Y") / creation_date.strftime("%m") / creation_date.strftime("%d")
+
+
+def get_archive_tasks(script_config: dict[str, Any], set_name: str) -> tuple[tuple[Path, Path], ...]:
     tasks = script_config.get("tasks", [])
 
     if not isinstance(tasks, list):
-        raise TypeError(f"Configuration value 'archive_media.{set_name}.tasks' must be a list")
+        raise TypeError(f"Configuration value '{config_key(set_name, 'tasks')}' must be a list")
 
-    return tuple(
-        (Path(str(task["source"])), Path(str(task["target"])))
-        for task in tasks
-    )
+    return tuple((Path(str(task["source"])), Path(str(task["target"]))) for task in tasks)
 
 
 def validate_archive_source(source: Path) -> None:
@@ -254,34 +268,36 @@ def validate_archive_source(source: Path) -> None:
         raise NotADirectoryError(f"Archive source is not a directory: {source}")
 
 
-def get_media_extensions(script_config: dict, set_name: str) -> set[str]:
+def get_media_extensions(script_config: dict[str, Any], set_name: str) -> set[str]:
     extensions = script_config.get("extensions", [])
 
     if not isinstance(extensions, list):
-        raise TypeError(f"Configuration value 'archive_media.{set_name}.extensions' must be a list")
+        raise TypeError(f"Configuration value '{config_key(set_name, 'extensions')}' must be a list")
 
     normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
 
     if not normalized_extensions:
-        raise ValueError(f"Configuration value 'archive_media.{set_name}.extensions' must define at least one extension")
+        raise ValueError(f"Configuration value '{config_key(set_name, 'extensions')}' must define at least one extension")
 
     return normalized_extensions
 
 
-def ensure_section(config: dict) -> None:
-    if "archive_media" not in config:
+def ensure_section(config: dict[str, Any]) -> None:
+    if CONFIG_SECTION not in config:
         append_section_yaml(config, DEFAULT_SECTION)
-        visual.print_warning("Added default 'archive_media' section to config.yaml. Please configure it before running.")
+        visual.print_warning(
+            f"Added default '{CONFIG_SECTION}' section to config.yaml. Please configure it before running."
+        )
         raise SystemExit(1)
 
-    get_table(config, "archive_media")
+    get_archive_sets(config)
 
 
-def config_for_archive_smb(config: dict, script_config: dict, set_name: str) -> dict:
+def config_for_archive_smb(config: dict[str, Any], script_config: dict[str, Any], set_name: str) -> dict[str, Any]:
     archive_smb = script_config.get("smb", False)
 
     if not isinstance(archive_smb, bool):
-        raise TypeError(f"Configuration value 'archive_media.{set_name}.smb' must be true or false")
+        raise TypeError(f"Configuration value '{config_key(set_name, 'smb')}' must be true or false")
 
     scoped_config = dict(config)
 
