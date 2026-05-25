@@ -1,10 +1,101 @@
 import subprocess
 import sys
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox
+from typing import Any
 
-import config_support as config_loader
+import yaml
+
 from winutils_python import visual
+
+
+def app_dir(script_file: str | Path) -> Path:
+    """Return the directory that should contain config.yaml.
+
+    In a normal Python run this is the script directory.
+    In a PyInstaller .exe this is the .exe directory, not the temporary
+    extraction directory used by --onefile builds.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    return Path(script_file).resolve().parent
+
+
+def script_dir(script_file: str | Path) -> Path:
+    # Backwards-compatible name used by the rest of the script.
+    return app_dir(script_file)
+
+
+def config_path(script_file: str | Path) -> Path:
+    return script_dir(script_file) / "config.yaml"
+
+
+def find_config_path(script_file: str | Path) -> Path:
+    path = config_path(script_file)
+
+    if not path.exists():
+        path.write_text("", encoding="utf-8")
+
+    return path
+
+
+def load_config(script_file: str | Path) -> dict[str, Any]:
+    path = find_config_path(script_file)
+    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
+
+    if loaded_config is None:
+        loaded_config = {}
+
+    loaded_config["__config_path__"] = path
+    return loaded_config
+
+
+def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
+    path = config.get("__config_path__")
+    if isinstance(path, Path):
+        existing = path.read_text(encoding="utf-8").rstrip()
+        separator = "\n\n" if existing else ""
+        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
+
+
+def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
+    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
+    table_config = loaded_config.setdefault(table, {})
+
+    if not isinstance(table_config, dict):
+        raise TypeError(f"Configuration value '{table}' must be a table")
+
+    table_config[key] = value
+    config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
+
+
+def remove_value(config_path: Path, table: str, key: str) -> None:
+    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
+    table_config = loaded_config.get(table, {})
+
+    if isinstance(table_config, dict) and key in table_config:
+        del table_config[key]
+        config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
+
+
+def parse_yaml(config_text: str) -> dict[str, Any]:
+    return yaml.safe_load(config_text) or {}
+
+
+def dump_yaml(config: dict[str, Any]) -> str:
+    clean = {k: v for k, v in config.items() if not k.startswith("__")}
+    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
+
+
+def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
+    value = config.get(name, {})
+
+    if not isinstance(value, dict):
+        raise TypeError(f"Configuration value '{name}' must be a table")
+
+    return value
 
 
 DEFAULT_SECTION = r'''ssh:
@@ -22,7 +113,7 @@ def normalize_set_name(set_name: str) -> str:
 
 
 def choose_ssh_set(config: dict) -> str:
-    ssh_sets = config_loader.get_table(config, "ssh")
+    ssh_sets = get_table(config, "ssh")
 
     if not ssh_sets:
         raise SystemExit("No SSH sets configured in config.yaml. Please add an 'ssh' section.")
@@ -68,7 +159,7 @@ def choose_ssh_set(config: dict) -> str:
 
 
 def choose_ssh_set_terminal(config: dict) -> str:
-    ssh_sets = config_loader.get_table(config, "ssh")
+    ssh_sets = get_table(config, "ssh")
 
     if not ssh_sets:
         raise SystemExit("No SSH sets configured in config.yaml. Please add an 'ssh' section.")
@@ -100,7 +191,7 @@ def validate_ssh_set_name(config: dict, set_name: str) -> str:
     if set_name.lower() in {"exit", "quit", "cancel"}:
         raise SystemExit(0)
 
-    ssh_sets = config_loader.get_table(config, "ssh")
+    ssh_sets = get_table(config, "ssh")
 
     if set_name not in ssh_sets:
         available_sets = ", ".join(ssh_sets) or "none"
@@ -123,7 +214,7 @@ def get_ssh_set(config: dict, set_name: str) -> dict:
     if set_name.lower() in {"exit", "quit", "cancel"}:
         raise SystemExit(0)
 
-    ssh_sets = config_loader.get_table(config, "ssh")
+    ssh_sets = get_table(config, "ssh")
     ssh_cfg = ssh_sets.get(set_name)
 
     if not isinstance(ssh_cfg, dict):
@@ -181,7 +272,7 @@ def optional_timeout(config: dict) -> float | None:
 
 def ensure_section(config: dict) -> None:
     if "ssh" not in config:
-        config_loader.append_section_yaml(config, DEFAULT_SECTION)
+        append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning("Added default 'ssh' section to config.yaml. Please configure it before running.")
         raise SystemExit(1)
 
@@ -229,7 +320,7 @@ def run_ssh_task(set_name: str, user: str, host: str, port: int, command: str, t
 
 
 def main() -> None:
-    cfg = config_loader.load(__file__)
+    cfg = load_config(__file__)
     ensure_section(cfg)
     set_name = ssh_set_name(cfg)
     ssh_cfg = get_ssh_set(cfg, set_name)
