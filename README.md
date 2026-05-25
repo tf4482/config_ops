@@ -15,8 +15,10 @@ In the future, Config Ops may help with:
 
 ## 🧩 Current tools
 
+- [`archive_media.pyw`](archive_media.pyw) moves media files into dated archive folders.
 - [`connect_smb.pyw`](connect_smb.pyw) connects configured SMB network shares.
 - [`file_operations.pyw`](file_operations.pyw) runs configured file operation sets.
+- [`ssh_tasks.pyw`](ssh_tasks.pyw) runs configured SSH command sets.
 - [`config_support.py`](config_support.py) owns all reads and writes for the project `config.yaml`.
 - [`winutils_python`](winutils_python/README.md) provides the reusable Windows helper modules.
 
@@ -51,6 +53,8 @@ uv run python file_operations.pyw backup
 
 Without an argument, it opens either a terminal selection or a small window to choose the operation set.
 
+Robocopy results are collected across all configured jobs. Exit codes below `8` are treated as successful Robocopy outcomes; exit codes `8` and above are summarized and reported as a process error after all jobs have been attempted.
+
 ## 🖼️ Media archive
 
 `archive_media.pyw` moves configured media files into dated archive folders based on filesystem creation time:
@@ -68,6 +72,24 @@ Archive behavior:
 - Files are moved into `target/YYYY/MM/DD/filename` folders.
 - If one task fails, later tasks still run.
 - After all tasks finish, failures are summarized and reported as a process error.
+
+## 🚀 SSH tasks
+
+`ssh_tasks.pyw` runs named SSH command sets from `config.yaml`:
+
+```powershell
+uv run python ssh_tasks.pyw manual_backup
+```
+
+Without an argument, it opens either a terminal selection or a small window to choose the SSH set.
+
+SSH task behavior:
+
+- `user`, `host`, `port` and `command` are required.
+- `port` must be in the range `1..65535`.
+- `timeout` is optional and must be a positive number when configured.
+- SSH failures, missing `ssh.exe`, and timeouts are reported clearly.
+- In non-terminal `.pyw` mode, SSH failure details are shown in a GUI error dialog.
 
 ## 🔌 SMB connections
 
@@ -123,6 +145,14 @@ archive_media:
   tasks:
     - source: 'R:\pictures\mobilecam'
       target: 'R:\pictures\mobilecam archive'
+
+ssh:
+  manual_backup:
+    user: user
+    host: 192.168.1.12
+    port: 51215
+    timeout: 300
+    command: manual_backup.bash
 ```
 
 ## 🔌 SMB shares
