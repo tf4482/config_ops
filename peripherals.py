@@ -10,6 +10,8 @@ import yaml
 from winutils_python import visual
 
 
+CONFIG_SECTION = "peripherals"
+REGISTRY_PATH_KEY = "registry_path"
 VALID_COMMANDS = {"on", "off", "toggle", "suspend", "resume"}
 DEFAULT_COMMAND = "toggle"
 
@@ -114,35 +116,35 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
     return value
 
 
-class config_loader:
-    load = staticmethod(load_config)
-    append_section_yaml = staticmethod(append_section_yaml)
-    get_table = staticmethod(get_table)
-
-
 def normalize_argument(argument: str) -> str:
     return argument.strip().lower().lstrip("/-")
 
 
 def ensure_section(config: dict[str, Any]) -> None:
-    if "peripherals" not in config:
+    if CONFIG_SECTION not in config:
         append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning(
-            "Added default 'peripherals' section to config.yaml. "
+            f"Added default '{CONFIG_SECTION}' section to config.yaml. "
             "Please configure the device URLs before running."
         )
         raise SystemExit(1)
 
+    peripherals_config(config)
+
 
 def peripherals_config(config: dict[str, Any]) -> dict[str, Any]:
-    return get_table(config, "peripherals")
+    return get_table(config, CONFIG_SECTION)
+
+
+def config_key(name: str) -> str:
+    return f"{CONFIG_SECTION}.{name}"
 
 
 def registry_path_from_config(peripherals: dict[str, Any]) -> str:
-    registry_path = str(peripherals.get("registry_path", "")).strip()
+    registry_path = str(peripherals.get(REGISTRY_PATH_KEY, "")).strip()
 
     if not registry_path:
-        raise ValueError("Configuration value 'peripherals.registry_path' must be set")
+        raise ValueError(f"Configuration value '{config_key(REGISTRY_PATH_KEY)}' must be set")
 
     return registry_path
 
@@ -151,7 +153,7 @@ def devices_from_config(peripherals: dict[str, Any]) -> dict[str, PeripheralDevi
     devices: dict[str, PeripheralDevice] = {}
 
     for name, value in peripherals.items():
-        if name == "registry_path":
+        if name == REGISTRY_PATH_KEY:
             continue
 
         if not isinstance(value, dict):
@@ -167,7 +169,11 @@ def devices_from_config(peripherals: dict[str, Any]) -> dict[str, PeripheralDevi
             raise ValueError(f"Peripheral device '{name}' must define an 'off' URL")
 
         normalized_name = normalize_argument(name)
-        devices[normalized_name] = PeripheralDevice(name=normalized_name, on_url=on_url, off_url=off_url)
+        devices[normalized_name] = PeripheralDevice(
+            name=normalized_name,
+            on_url=on_url,
+            off_url=off_url,
+        )
 
     if not devices:
         raise ValueError("No peripheral devices configured")
@@ -243,7 +249,10 @@ def run_device_command(registry_path: str, device: PeripheralDevice, command: st
         raise ValueError(f"Unsupported command: {command}")
 
 
-def parse_arguments(arguments: list[str], devices: dict[str, PeripheralDevice]) -> tuple[list[PeripheralDevice], str]:
+def parse_arguments(
+    arguments: list[str],
+    devices: dict[str, PeripheralDevice],
+) -> tuple[list[PeripheralDevice], str]:
     selected_device_names: list[str] = []
     command = DEFAULT_COMMAND
 
@@ -268,7 +277,8 @@ def parse_arguments(arguments: list[str], devices: dict[str, PeripheralDevice]) 
     if not selected_device_names:
         selected_device_names = list(devices.keys())
 
-    return ([devices[name] for name in selected_device_names], command)
+    selected_devices = [devices[name] for name in selected_device_names]
+    return selected_devices, command
 
 
 def main() -> None:
@@ -285,9 +295,7 @@ def main() -> None:
     for device in selected_devices:
         run_device_command(registry_path, device, command)
 
-    visual.print_done(
-        f"Peripheral command finished: /{command} for {len(selected_devices)} device(s)"
-    )
+    visual.print_done(f"Peripheral command finished: /{command} for {len(selected_devices)} device(s)")
 
 
 if __name__ == "__main__":
