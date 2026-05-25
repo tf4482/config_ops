@@ -7,11 +7,14 @@ from winutils_python import connect_smb, file_ops, visual
 
 DEFAULT_SECTION = r'''file_operations:
   example_set:
+    robocopy:
+      common_options: ['/MT:32', '/W:2', '/R:10', '/XJD', '/XJF', '/XJ', '/XC', '/ETA', '/TEE']
     mirror:
       - source: 'C:\path\to\source'
         target: 'R:\path\to\target'
     copy:
       overwrite: false
+      options: ['/E', '/MT:16', '/W:2', '/R:5', '/XJD', '/XJF', '/XJ', '/XC', '/ETA', '/TEE']
       tasks:
         - source: 'C:\path\to\source'
           target: 'E:\path\to\target'
