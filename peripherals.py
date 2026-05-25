@@ -16,16 +16,12 @@ DEFAULT_SECTION = r'''peripherals:
   registry_path: 'Software\peripherals'
 
   led:
-    on: 'https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=placeholder'
-    off: 'https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=placeholder'
-
-  boxen:
-    on: 'https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=placeholder'
-    off: 'https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=placeholder'
+    on: 'https://www.placeholder'
+    off: 'https://www.placeholder'
 
   tv:
-    on: 'https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=placeholder'
-    off: 'https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=placeholder'
+    on: 'https://www.placeholder'
+    off: 'https://www.placeholder'
 '''
 
 
@@ -286,15 +282,9 @@ def write_device_state(
 
 
 def trigger_url(url: str) -> None:
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    startupinfo.wShowWindow = 0
-
     subprocess.Popen(
         ["curl.exe", url],
         cwd=script_dir(),
-        creationflags=subprocess.CREATE_NO_WINDOW,
-        startupinfo=startupinfo,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
