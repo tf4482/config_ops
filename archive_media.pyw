@@ -7,6 +7,7 @@ from winutils_python import connect_smb, visual
 
 
 DEFAULT_SECTION = r'''archive_media:
+  smb: false
   extensions:
     - .jpg
     - .jpeg
@@ -108,13 +109,28 @@ def ensure_section(config: dict) -> dict:
     return config_loader.get_table(config, "archive_media")
 
 
+def config_for_archive_smb(config: dict, script_config: dict) -> dict:
+    archive_smb = script_config.get("smb", False)
+
+    if not isinstance(archive_smb, bool):
+        raise TypeError("Configuration value 'archive_media.smb' must be true or false")
+
+    scoped_config = dict(config)
+
+    if archive_smb:
+        return scoped_config
+
+    scoped_config.pop("smb", None)
+    return scoped_config
+
+
 def main() -> None:
     config = config_loader.load(__file__)
     script_config = ensure_section(config)
 
     visual.print_start("Starting media archive")
     connect_smb.connect_from_config(
-        config,
+        config_for_archive_smb(config, script_config),
         on_password_prompted=lambda password: store_prompted_smb_password(config, password),
     )
 
