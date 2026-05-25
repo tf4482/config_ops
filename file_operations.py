@@ -1,7 +1,5 @@
 import sys
-import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox
 from typing import Any
 
 import yaml
@@ -113,53 +111,6 @@ def operation_set_config(config: dict, set_name: str) -> dict:
     return operation_set
 
 
-def choose_operation_set(config: dict) -> str:
-    operation_sets = config_loader.get_table(config, "file_operations")
-
-    if not operation_sets:
-        raise SystemExit("No file operation sets configured in config.yaml. Please add a 'file_operations' section.")
-
-    root = tk.Tk()
-    root.title("Choose file operation")
-    root.geometry("420x320")
-    root.attributes("-topmost", True)
-
-    selected = tk.StringVar(value="")
-    label = tk.Label(root, text="Choose a file operation set:")
-    label.pack(padx=12, pady=(12, 6), anchor="w")
-
-    listbox = tk.Listbox(root)
-    for name in operation_sets:
-        listbox.insert(tk.END, name)
-    listbox.selection_set(0)
-    listbox.pack(padx=12, pady=6, fill=tk.BOTH, expand=True)
-
-    def accept_selection() -> None:
-        selection = listbox.curselection()
-        if not selection:
-            messagebox.showwarning("No selection", "Select an operation set first.", parent=root)
-            return
-
-        selected.set(str(listbox.get(selection[0])))
-        root.destroy()
-
-    def cancel_selection() -> None:
-        root.destroy()
-
-    button_frame = tk.Frame(root)
-    button_frame.pack(padx=12, pady=(6, 12), fill=tk.X)
-    tk.Button(button_frame, text="Run", command=accept_selection).pack(side=tk.RIGHT, padx=(6, 0))
-    tk.Button(button_frame, text="Cancel", command=cancel_selection).pack(side=tk.RIGHT)
-
-    listbox.bind("<Double-Button-1>", lambda _event: accept_selection())
-    root.mainloop()
-
-    if not selected.get():
-        raise SystemExit("No file operation set selected")
-
-    return selected.get()
-
-
 def choose_operation_set_terminal(config: dict) -> str:
     operation_sets = config_loader.get_table(config, "file_operations")
 
@@ -193,10 +144,7 @@ def operation_set_name(config: dict) -> str:
     if len(sys.argv) > 1:
         return validate_operation_set_name(config, normalize_set_name(sys.argv[1]))
 
-    if visual.is_terminal():
-        return choose_operation_set_terminal(config)
-
-    return choose_operation_set(config)
+    return choose_operation_set_terminal(config)
 
 
 def ensure_section(config: dict) -> None:
@@ -238,9 +186,9 @@ def store_prompted_smb_password(config: dict, set_name: str, password: str) -> N
         if config_path is None:
             raise ValueError("Loaded configuration is missing internal '__config_path__'")
 
-        config_loader.replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
-        config_loader.remove_value(config_path, "smb", "password_file")
-        config_loader.remove_value(config_path, "smb", "password")
+        connect_smb.replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
+        connect_smb.remove_value(config_path, "smb", "password_file")
+        connect_smb.remove_value(config_path, "smb", "password")
 
 
 def main() -> None:
