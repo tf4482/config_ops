@@ -25,8 +25,12 @@ def ensure_section(config: dict) -> None:
 def main() -> None:
     config = config_loader.load(__file__)
     ensure_section(config)
-    connect_smb.connect_from_config(config)
-    visual.print_done("SMB shares connected")
+    connected = connect_smb.connect_from_config(config)
+
+    if connected:
+        visual.print_done("SMB shares connected")
+    else:
+        visual.print_warning("No SMB shares connected")
 
 
 if __name__ == "__main__":
