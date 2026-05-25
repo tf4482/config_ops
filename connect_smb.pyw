@@ -6,6 +6,8 @@ import yaml
 
 from winutils_python import connect_smb, visual
 
+CONFIG_SECTION = "smb"
+
 
 DEFAULT_SECTION = r'''smb:
   user: 'DOMAIN\user'
@@ -52,10 +54,13 @@ def load(script_file: str | Path) -> dict[str, Any]:
 
 def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
     path = config.get("__config_path__")
-    if isinstance(path, Path):
-        existing = path.read_text(encoding="utf-8").rstrip()
-        separator = "\n\n" if existing else ""
-        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
+
+    if not isinstance(path, Path):
+        return
+
+    existing = path.read_text(encoding="utf-8").rstrip()
+    separator = "\n\n" if existing else ""
+    path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
 
 
 def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
@@ -83,7 +88,7 @@ def parse_yaml(config_text: str) -> dict[str, Any]:
 
 
 def dump_yaml(config: dict[str, Any]) -> str:
-    clean = {k: v for k, v in config.items() if not k.startswith("__")}
+    clean = {key: value for key, value in config.items() if not key.startswith("__")}
     return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
 
 
@@ -96,25 +101,33 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
     return value
 
 
-def ensure_section(config: dict) -> None:
-    if "smb" not in config:
+def ensure_section(config: dict[str, Any]) -> None:
+    if CONFIG_SECTION not in config:
         append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning(
-            "Added default 'smb' section to config.yaml. "
+            f"Added default '{CONFIG_SECTION}' section to config.yaml. "
             "Please configure 'smb.user' and 'smb.mappings' before running. "
             "The encrypted password will be added after the first successful password prompt."
         )
         raise SystemExit(1)
 
+    get_table(config, CONFIG_SECTION)
 
-def store_prompted_smb_password(config: dict, password: str) -> None:
+
+def store_prompted_smb_password(config: dict[str, Any], password: str) -> None:
     config_path = config.get("__config_path__")
+
     if config_path is None:
         raise ValueError("Loaded configuration is missing internal '__config_path__'")
 
-    replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
-    remove_value(config_path, "smb", "password_file")
-    remove_value(config_path, "smb", "password")
+    replace_or_add_string_value(
+        config_path,
+        CONFIG_SECTION,
+        "encrypted_password",
+        connect_smb.encrypt_password(password),
+    )
+    remove_value(config_path, CONFIG_SECTION, "password_file")
+    remove_value(config_path, CONFIG_SECTION, "password")
 
 
 def main() -> None:
