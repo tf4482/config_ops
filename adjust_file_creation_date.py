@@ -7,7 +7,6 @@ creation, access, and modification times through the Win32 ``SetFileTime`` API.
 
 import re
 import shutil
-import sys
 from ctypes import Structure, WinDLL, byref, c_bool, c_uint32, c_void_p, c_wchar_p
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -15,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from winutils_python import config as config_utils
-from winutils_python import connect_smb, menu, visual
+from winutils_python import config_sets, connect_smb, visual
 
 
 DEFAULT_SECTION = r'''adjust_file_creation_date:
@@ -105,69 +104,13 @@ def ensure_section(config: dict[str, Any]) -> None:
         )
         raise SystemExit(1)
 
-    get_adjustment_sets(config)
+    config_sets.section_sets(config, CONFIG_SECTION)
 
 
 def config_key(set_name: str, name: str) -> str:
     """Return a human-readable dotted config key for error messages."""
 
-    return f"{CONFIG_SECTION}.{set_name}.{name}"
-
-
-def get_adjustment_sets(config: dict[str, Any]) -> dict[str, Any]:
-    """Return all configured file creation date adjustment sets."""
-
-    return config_utils.get_table(config, CONFIG_SECTION)
-
-
-def validate_adjustment_set_name(config: dict[str, Any], set_name: str) -> str:
-    """Validate a requested adjustment set name and return it unchanged."""
-
-    adjustment_sets = get_adjustment_sets(config)
-
-    if set_name not in adjustment_sets:
-        available_sets = ", ".join(adjustment_sets) or "none"
-        raise SystemExit(
-            f"Unknown file creation date adjustment set '{set_name}'. "
-            f"Available sets: {available_sets}"
-        )
-
-    return set_name
-
-
-def adjustment_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any]:
-    """Return the configuration table for a named adjustment set."""
-
-    adjustment_sets = get_adjustment_sets(config)
-    adjustment_set = adjustment_sets.get(set_name)
-
-    if not isinstance(adjustment_set, dict):
-        raise TypeError(f"File creation date adjustment set '{set_name}' must be a table")
-
-    return adjustment_set
-
-
-def choose_adjustment_set_terminal(config: dict[str, Any]) -> str:
-    """Prompt the user to choose an adjustment set from the terminal."""
-
-    adjustment_sets = get_adjustment_sets(config)
-    return menu.choose_mapping_key_terminal(
-        adjustment_sets,
-        header="Available file creation date adjustment sets:",
-        empty_message=(
-            "No file creation date adjustment sets configured in config.yaml. "
-            f"Please add an '{CONFIG_SECTION}' section."
-        ),
-    )
-
-
-def adjustment_set_name(config: dict[str, Any]) -> str:
-    """Return the selected adjustment set from CLI args or the terminal menu."""
-
-    if len(sys.argv) > 1:
-        return validate_adjustment_set_name(config, menu.normalize_selection_name(sys.argv[1]))
-
-    return choose_adjustment_set_terminal(config)
+    return config_sets.config_key(CONFIG_SECTION, set_name, name)
 
 
 def registry_path_from_config(script_config: dict[str, Any], set_name: str) -> str:
@@ -489,8 +432,22 @@ def main() -> None:
 
     config = config_utils.load(__file__)
     ensure_section(config)
-    set_name = adjustment_set_name(config)
-    script_config = adjustment_set_config(config, set_name)
+    set_name = config_sets.selected_set_name(
+        config,
+        CONFIG_SECTION,
+        label="file creation date adjustment set",
+        header="Available file creation date adjustment sets:",
+        empty_message=(
+            "No file creation date adjustment sets configured in config.yaml. "
+            f"Please add an '{CONFIG_SECTION}' section."
+        ),
+    )
+    script_config = config_sets.get_set_config(
+        config,
+        CONFIG_SECTION,
+        set_name,
+        label="File creation date adjustment set",
+    )
 
     visual.print_start(f"Starting file creation date adjustment: {set_name}")
     connect_smb.connect_from_config(
