@@ -113,30 +113,6 @@ def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
     path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
 
 
-def replace_or_add_string_value(path: Path, table: str, key: str, value: str) -> None:
-    """Replace or add a string value inside a top-level config table."""
-
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-    table_config = loaded_config.setdefault(table, {})
-
-    if not isinstance(table_config, dict):
-        raise TypeError(f"Configuration value '{table}' must be a table")
-
-    table_config[key] = value
-    path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def remove_value(path: Path, table: str, key: str) -> None:
-    """Remove a key from a top-level config table when it exists."""
-
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-    table_config = loaded_config.get(table, {})
-
-    if isinstance(table_config, dict) and key in table_config:
-        del table_config[key]
-        path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
 def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
     """Return a top-level config table or raise when the value is not a table."""
 

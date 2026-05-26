@@ -163,30 +163,6 @@ def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
     path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
 
 
-def replace_or_add_string_value(path: Path, table: str, key: str, value: str) -> None:
-    """Replace or add a string value inside a top-level config table."""
-
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-    table_config = loaded_config.setdefault(table, {})
-
-    if not isinstance(table_config, dict):
-        raise TypeError(f"Configuration value '{table}' must be a table")
-
-    table_config[key] = value
-    path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def remove_value(path: Path, table: str, key: str) -> None:
-    """Remove a key from a top-level config table when it exists."""
-
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-    table_config = loaded_config.get(table, {})
-
-    if isinstance(table_config, dict) and key in table_config:
-        del table_config[key]
-        path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
 def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
     """Return a top-level config table or raise when the value is not a table."""
 
@@ -571,24 +547,6 @@ def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
         visual.print_error(f"Failed timestamp update: {result.source}: {result.error}")
 
 
-def store_prompted_smb_password(config: dict, password: str) -> None:
-    """Persist a prompted SMB password and remove legacy password fields."""
-
-    config_path = config.get("__config_path__")
-
-    if config_path is None:
-        raise ValueError("Loaded configuration is missing internal '__config_path__'")
-
-    replace_or_add_string_value(
-        config_path,
-        "smb",
-        "encrypted_password",
-        connect_smb.encrypt_password(password),
-    )
-    remove_value(config_path, "smb", "password_file")
-    remove_value(config_path, "smb", "password")
-
-
 def config_for_adjust_smb(config: dict, script_config: dict, set_name: str) -> dict:
     """Return the scoped config used for optional SMB connection setup."""
 
@@ -617,7 +575,7 @@ def main() -> None:
     visual.print_start(f"Starting file creation date adjustment: {set_name}")
     connect_smb.connect_from_config(
         config_for_adjust_smb(config, script_config, set_name),
-        on_password_prompted=lambda password: store_prompted_smb_password(config, password),
+        on_password_prompted=lambda password: connect_smb.store_prompted_password(config, password),
     )
 
     results = adjust_file_creation_dates(script_config, set_name)

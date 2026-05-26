@@ -214,18 +214,7 @@ def store_prompted_smb_password(config: dict[str, Any], set_name: str, password:
     set_smb = operation_set.get("smb", False)
 
     if set_smb is True:
-        config_path = config.get("__config_path__")
-        if config_path is None:
-            raise ValueError("Loaded configuration is missing internal '__config_path__'")
-
-        connect_smb.replace_or_add_string_value(
-            config_path,
-            "smb",
-            "encrypted_password",
-            connect_smb.encrypt_password(password),
-        )
-        connect_smb.remove_value(config_path, "smb", "password_file")
-        connect_smb.remove_value(config_path, "smb", "password")
+        connect_smb.store_prompted_password(config, password)
 
 
 def main() -> None:
