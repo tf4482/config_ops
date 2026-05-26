@@ -1,3 +1,9 @@
+"""Run named Robocopy-based file operation sets from project config.
+
+The script selects a ``file_operations`` set, optionally connects SMB mappings,
+and delegates mirror/copy/move execution to ``winutils_python.file_ops``.
+"""
+
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,14 +29,20 @@ def app_dir(script_file: str | Path) -> Path:
 
 
 def script_dir(script_file: str | Path) -> Path:
+    """Return the directory used for script-local runtime files."""
+
     return app_dir(script_file)
 
 
 def config_path(script_file: str | Path) -> Path:
+    """Return the expected ``config.yaml`` path for this script."""
+
     return script_dir(script_file) / "config.yaml"
 
 
 def find_config_path(script_file: str | Path) -> Path:
+    """Return the config path, creating an empty config file when missing."""
+
     path = config_path(script_file)
 
     if not path.exists():
@@ -40,15 +52,21 @@ def find_config_path(script_file: str | Path) -> Path:
 
 
 def parse_yaml(config_text: str) -> dict[str, Any]:
+    """Parse YAML config text into a dictionary, treating empty files as empty."""
+
     return yaml.safe_load(config_text) or {}
 
 
 def dump_yaml(config: dict[str, Any]) -> str:
+    """Serialize config while omitting internal helper keys."""
+
     clean = {key: value for key, value in config.items() if not key.startswith("__")}
     return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
 
 
 def load(script_file: str | Path) -> dict[str, Any]:
+    """Load ``config.yaml`` and attach its path under an internal helper key."""
+
     path = find_config_path(script_file)
     loaded_config = parse_yaml(path.read_text(encoding="utf-8")) or {}
     loaded_config["__config_path__"] = path
@@ -56,6 +74,8 @@ def load(script_file: str | Path) -> dict[str, Any]:
 
 
 def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
+    """Append a default YAML section to the loaded config file."""
+
     path = config.get("__config_path__")
 
     if not isinstance(path, Path):
@@ -67,6 +87,8 @@ def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
 
 
 def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
+    """Return a top-level config table or raise when the value is not a table."""
+
     value = config.get(name, {})
 
     if not isinstance(value, dict):
@@ -98,10 +120,14 @@ DEFAULT_SECTION = r'''file_operations:
 
 
 def get_operation_sets(config: dict[str, Any]) -> dict[str, Any]:
+    """Return all configured file operation sets."""
+
     return get_table(config, CONFIG_SECTION)
 
 
 def validate_operation_set_name(config: dict[str, Any], set_name: str) -> str:
+    """Validate a requested operation set name and return it unchanged."""
+
     operation_sets = get_operation_sets(config)
 
     if set_name not in operation_sets:
@@ -112,6 +138,8 @@ def validate_operation_set_name(config: dict[str, Any], set_name: str) -> str:
 
 
 def operation_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any]:
+    """Return the configuration table for a named operation set."""
+
     operation_sets = get_operation_sets(config)
     operation_set = operation_sets.get(set_name)
 
@@ -122,6 +150,8 @@ def operation_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any
 
 
 def choose_operation_set_terminal(config: dict[str, Any]) -> str:
+    """Prompt the user to choose a file operation set from the terminal."""
+
     operation_sets = get_operation_sets(config)
     return menu.choose_mapping_key_terminal(
         operation_sets,
@@ -131,6 +161,8 @@ def choose_operation_set_terminal(config: dict[str, Any]) -> str:
 
 
 def operation_set_name(config: dict[str, Any]) -> str:
+    """Return the selected operation set from CLI args or the terminal menu."""
+
     if len(sys.argv) > 1:
         return validate_operation_set_name(config, menu.normalize_selection_name(sys.argv[1]))
 
@@ -138,6 +170,8 @@ def operation_set_name(config: dict[str, Any]) -> str:
 
 
 def ensure_section(config: dict[str, Any]) -> None:
+    """Ensure the file operations section exists and has table shape."""
+
     if CONFIG_SECTION not in config:
         append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning(
@@ -149,6 +183,8 @@ def ensure_section(config: dict[str, Any]) -> None:
 
 
 def config_for_operation_set_smb(config: dict[str, Any], set_name: str) -> dict[str, Any]:
+    """Return the scoped config used for optional SMB connection setup."""
+
     operation_set = operation_set_config(config, set_name)
     set_smb = operation_set.get("smb", False)
 
@@ -172,6 +208,8 @@ def config_for_operation_set_smb(config: dict[str, Any], set_name: str) -> dict[
 
 
 def store_prompted_smb_password(config: dict[str, Any], set_name: str, password: str) -> None:
+    """Persist a prompted SMB password when the selected set uses SMB."""
+
     operation_set = operation_set_config(config, set_name)
     set_smb = operation_set.get("smb", False)
 
@@ -191,6 +229,8 @@ def store_prompted_smb_password(config: dict[str, Any], set_name: str, password:
 
 
 def main() -> None:
+    """Run the selected file operation set."""
+
     config = load(__file__)
     ensure_section(config)
     set_name = operation_set_name(config)
