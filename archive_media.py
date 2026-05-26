@@ -131,11 +131,7 @@ def dated_archive_folder(target: Path, creation_date: datetime) -> Path:
 def get_archive_tasks(script_config: dict[str, Any], set_name: str) -> tuple[tuple[Path, Path], ...]:
     """Return configured archive task source and target path pairs."""
 
-    tasks = script_config.get("tasks", [])
-
-    if not isinstance(tasks, list):
-        raise TypeError(f"Configuration value '{config_key(set_name, 'tasks')}' must be a list")
-
+    tasks = config_utils.required_list(script_config, "tasks", label=config_key(set_name, "tasks"))
     return tuple((Path(str(task["source"])), Path(str(task["target"]))) for task in tasks)
 
 
@@ -152,17 +148,11 @@ def validate_archive_source(source: Path) -> None:
 def get_media_extensions(script_config: dict[str, Any], set_name: str) -> set[str]:
     """Return normalized lowercase media extensions for a set."""
 
-    extensions = script_config.get("extensions", [])
-
-    if not isinstance(extensions, list):
-        raise TypeError(f"Configuration value '{config_key(set_name, 'extensions')}' must be a list")
-
-    normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
-
-    if not normalized_extensions:
-        raise ValueError(f"Configuration value '{config_key(set_name, 'extensions')}' must define at least one extension")
-
-    return normalized_extensions
+    return config_utils.normalized_extension_set(
+        script_config,
+        "extensions",
+        label=config_key(set_name, "extensions"),
+    )
 
 
 def ensure_section(config: dict[str, Any]) -> None:
