@@ -6,11 +6,9 @@ command settings, executes ``ssh.exe``, and reports common SSH failures clearly.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
-import yaml
-
+from winutils_python import config as config_utils
 from winutils_python import menu, visual
 
 CONFIG_SECTION = "ssh"
@@ -26,86 +24,10 @@ DEFAULT_SECTION = r'''ssh:
     command: 'ls'
 '''
 
-
-def app_dir(script_file: str | Path) -> Path:
-    """Return the directory containing the script or frozen executable."""
-
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-
-    return Path(script_file).resolve().parent
-
-
-def script_dir(script_file: str | Path) -> Path:
-    """Return the directory used for script-local runtime files."""
-
-    return app_dir(script_file)
-
-
-def config_path(script_file: str | Path) -> Path:
-    """Return the expected ``config.yaml`` path for this script."""
-
-    return script_dir(script_file) / "config.yaml"
-
-
-def find_config_path(script_file: str | Path) -> Path:
-    """Return the config path, creating an empty config file when missing."""
-
-    path = config_path(script_file)
-
-    if not path.exists():
-        path.write_text("", encoding="utf-8")
-
-    return path
-
-
-def load_config(script_file: str | Path) -> dict[str, Any]:
-    """Load ``config.yaml`` and attach its path under an internal helper key."""
-
-    path = find_config_path(script_file)
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-
-    if loaded_config is None:
-        loaded_config = {}
-
-    loaded_config["__config_path__"] = path
-    return loaded_config
-
-
-def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
-    """Append a default YAML section to the loaded config file."""
-
-    path = config.get("__config_path__")
-
-    if not isinstance(path, Path):
-        return
-
-    existing = path.read_text(encoding="utf-8").rstrip()
-    separator = "\n\n" if existing else ""
-    path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
-
-
-def parse_yaml(config_text: str) -> dict[str, Any]:
-    """Parse YAML config text into a dictionary, treating empty files as empty."""
-
-    return yaml.safe_load(config_text) or {}
-
-
-def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
-    """Return a top-level config table or raise when the value is not a table."""
-
-    value = config.get(name, {})
-
-    if not isinstance(value, dict):
-        raise TypeError(f"Configuration value '{name}' must be a table")
-
-    return value
-
-
 def get_ssh_sets(config: dict[str, Any]) -> dict[str, Any]:
     """Return all configured SSH task sets."""
 
-    return get_table(config, CONFIG_SECTION)
+    return config_utils.get_table(config, CONFIG_SECTION)
 
 
 def choose_ssh_set_terminal(config: dict[str, Any]) -> str:
@@ -216,7 +138,7 @@ def ensure_section(config: dict[str, Any]) -> None:
     """Ensure the SSH section exists and has table shape."""
 
     if CONFIG_SECTION not in config:
-        append_section_yaml(config, DEFAULT_SECTION)
+        config_utils.append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning(
             f"Added default '{CONFIG_SECTION}' section to config.yaml. Please configure it before running."
         )
@@ -269,7 +191,7 @@ def run_ssh_task(
 def main() -> None:
     """Run the selected SSH task set."""
 
-    cfg = load_config(__file__)
+    cfg = config_utils.load(__file__)
     ensure_section(cfg)
     set_name = ssh_set_name(cfg)
     ssh_cfg = get_ssh_set(cfg, set_name)
