@@ -95,30 +95,6 @@ def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
     path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
 
 
-def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
-    """Replace or add a string value inside a top-level config table."""
-
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.setdefault(table, {})
-
-    if not isinstance(table_config, dict):
-        raise TypeError(f"Configuration value '{table}' must be a table")
-
-    table_config[key] = value
-    config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def remove_value(config_path: Path, table: str, key: str) -> None:
-    """Remove a key from a top-level config table when it exists."""
-
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.get(table, {})
-
-    if isinstance(table_config, dict) and key in table_config:
-        del table_config[key]
-        config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
 def parse_yaml(config_text: str) -> dict[str, Any]:
     """Parse YAML config text into a dictionary, treating empty files as empty."""
 
@@ -184,23 +160,6 @@ class ArchiveMediaError(RuntimeError):
             for result in failed_results
         )
         super().__init__(f"{len(failed_results)} archive media task(s) failed: {summary}")
-
-
-def store_prompted_smb_password(config: dict[str, Any], password: str) -> None:
-    """Persist a prompted SMB password and remove legacy password fields."""
-
-    config_path = config.get("__config_path__")
-    if config_path is None:
-        raise ValueError("Loaded configuration is missing internal '__config_path__'")
-
-    replace_or_add_string_value(
-        config_path,
-        "smb",
-        "encrypted_password",
-        connect_smb.encrypt_password(password),
-    )
-    remove_value(config_path, "smb", "password_file")
-    remove_value(config_path, "smb", "password")
 
 
 def validate_archive_set_name(config: dict[str, Any], set_name: str) -> str:
@@ -419,7 +378,7 @@ def main() -> None:
     visual.print_start(f"Starting media archive: {set_name}")
     connect_smb.connect_from_config(
         config_for_archive_smb(config, script_config, set_name),
-        on_password_prompted=lambda password: store_prompted_smb_password(config, password),
+        on_password_prompted=lambda password: connect_smb.store_prompted_password(config, password),
     )
 
     extensions = get_media_extensions(script_config, set_name)
