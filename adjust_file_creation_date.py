@@ -400,23 +400,6 @@ def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
         visual.print_error(f"Failed timestamp update: {result.source}: {result.error}")
 
 
-def config_for_adjust_smb(config: dict, script_config: dict, set_name: str) -> dict:
-    """Return the scoped config used for optional SMB connection setup."""
-
-    adjust_smb = script_config.get("smb", False)
-
-    if not isinstance(adjust_smb, bool):
-        raise TypeError(f"Configuration value '{config_key(set_name, 'smb')}' must be true or false")
-
-    scoped_config = dict(config)
-
-    if adjust_smb:
-        return scoped_config
-
-    scoped_config.pop("smb", None)
-    return scoped_config
-
-
 def main() -> None:
     """Run the selected file creation date adjustment set."""
 
@@ -441,7 +424,11 @@ def main() -> None:
 
     visual.print_start(f"Starting file creation date adjustment: {set_name}")
     connect_smb.connect_from_config(
-        config_for_adjust_smb(config, script_config, set_name),
+        connect_smb.scoped_config_for_optional_smb(
+            config,
+            script_config,
+            error_label=f"Configuration value '{config_key(set_name, 'smb')}'",
+        ),
         on_password_prompted=lambda password: connect_smb.store_prompted_password(config, password),
     )
 

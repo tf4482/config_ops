@@ -52,41 +52,6 @@ def ensure_section(config: dict[str, Any]) -> None:
     config_sets.section_sets(config, CONFIG_SECTION)
 
 
-def config_for_operation_set_smb(config: dict[str, Any], set_name: str) -> dict[str, Any]:
-    """Return the scoped config used for optional SMB connection setup."""
-
-    operation_set = operation_set_config(config, set_name)
-    set_smb = operation_set.get("smb", False)
-
-    if not isinstance(set_smb, bool):
-        raise TypeError(f"File operation set '{set_name}' value 'smb' must be true or false")
-
-    scoped_config = dict(config)
-
-    if set_smb is True:
-        if "smb" in config:
-            return scoped_config
-
-        scoped_config.pop("smb", None)
-        return scoped_config
-
-    if set_smb in (False, None):
-        scoped_config.pop("smb", None)
-        return scoped_config
-
-    return scoped_config
-
-
-def store_prompted_smb_password(config: dict[str, Any], set_name: str, password: str) -> None:
-    """Persist a prompted SMB password when the selected set uses SMB."""
-
-    operation_set = operation_set_config(config, set_name)
-    set_smb = operation_set.get("smb", False)
-
-    if set_smb is True:
-        connect_smb.store_prompted_password(config, password)
-
-
 def main() -> None:
     """Run the selected file operation set."""
 
@@ -101,9 +66,19 @@ def main() -> None:
     )
 
     visual.print_start(f"Starting file operations: {set_name}")
+    operation_set = operation_set_config(config, set_name)
     connect_smb.connect_from_config(
-        config_for_operation_set_smb(config, set_name),
-        on_password_prompted=lambda password: store_prompted_smb_password(config, set_name, password),
+        connect_smb.scoped_config_for_optional_smb(
+            config,
+            operation_set,
+            error_label=f"File operation set '{set_name}' value 'smb'",
+        ),
+        on_password_prompted=lambda password: connect_smb.store_prompted_password_if_enabled(
+            config,
+            operation_set,
+            password,
+            error_label=f"File operation set '{set_name}' value 'smb'",
+        ),
     )
     file_ops.run_operation_set(config, set_name)
     visual.print_done(f"File operations finished: {set_name}")
