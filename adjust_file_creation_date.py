@@ -166,36 +166,26 @@ def hour_adjustment_from_config(script_config: dict[str, Any]) -> int:
     return int(script_config.get("hour_adjustment", 0))
 
 
-def read_config_list(script_config: dict[str, Any], set_name: str, name: str) -> list[Any]:
-    """Read and validate a required non-empty list from a set config."""
-
-    value = script_config.get(name, [])
-
-    if not isinstance(value, list):
-        raise TypeError(f"Configuration value '{config_key(set_name, name)}' must be a list")
-
-    if not value:
-        raise ValueError(f"Configuration value '{config_key(set_name, name)}' must define at least one entry")
-
-    return value
-
-
 def get_file_extensions(script_config: dict[str, Any], set_name: str) -> set[str]:
     """Return normalized lowercase file extensions to process."""
 
-    extensions = read_config_list(script_config, set_name, "extensions")
-    normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
-
-    if not normalized_extensions:
-        raise ValueError(f"Configuration value '{config_key(set_name, 'extensions')}' must define at least one extension")
-
-    return normalized_extensions
+    return config_utils.normalized_extension_set(
+        script_config,
+        "extensions",
+        label=config_key(set_name, "extensions"),
+        non_empty=True,
+    )
 
 
 def get_patterns(script_config: dict[str, Any], set_name: str) -> list[re.Pattern[str]]:
     """Compile and validate configured filename timestamp regex patterns."""
 
-    pattern_configs = read_config_list(script_config, set_name, "patterns")
+    pattern_configs = config_utils.required_list(
+        script_config,
+        "patterns",
+        label=config_key(set_name, "patterns"),
+        non_empty=True,
+    )
 
     compiled_patterns: list[re.Pattern] = []
     for index, pattern_config in enumerate(pattern_configs, start=1):
