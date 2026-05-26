@@ -5,14 +5,12 @@ command settings, executes ``ssh.exe``, and reports common SSH failures clearly.
 """
 
 import subprocess
-import sys
 from typing import Any
 
 from winutils_python import config as config_utils
-from winutils_python import menu, visual
+from winutils_python import config_sets, visual
 
 CONFIG_SECTION = "ssh"
-CANCEL_CHOICES = {"exit", "quit", "cancel"}
 
 
 DEFAULT_SECTION = r'''ssh:
@@ -23,63 +21,6 @@ DEFAULT_SECTION = r'''ssh:
     timeout: 300
     command: 'ls'
 '''
-
-def get_ssh_sets(config: dict[str, Any]) -> dict[str, Any]:
-    """Return all configured SSH task sets."""
-
-    return config_utils.get_table(config, CONFIG_SECTION)
-
-
-def choose_ssh_set_terminal(config: dict[str, Any]) -> str:
-    """Prompt the user to choose an SSH set from the terminal."""
-
-    ssh_sets = get_ssh_sets(config)
-    return menu.choose_mapping_key_terminal(
-        ssh_sets,
-        header="Available SSH sets:",
-        empty_message=f"No SSH sets configured in config.yaml. Please add an '{CONFIG_SECTION}' section.",
-        prompt="Select SSH set by number or name (or 'exit' to cancel): ",
-    )
-
-
-def validate_ssh_set_name(config: dict[str, Any], set_name: str) -> str:
-    """Validate a requested SSH set name and handle cancel aliases."""
-
-    if set_name.lower() in CANCEL_CHOICES:
-        raise SystemExit(0)
-
-    ssh_sets = get_ssh_sets(config)
-
-    if set_name not in ssh_sets:
-        available_sets = ", ".join(ssh_sets) or "none"
-        raise SystemExit(f"Unknown SSH set '{set_name}'. Available sets: {available_sets}")
-
-    return set_name
-
-
-def ssh_set_name(config: dict[str, Any]) -> str:
-    """Return the selected SSH set from CLI args or the terminal menu."""
-
-    if len(sys.argv) > 1:
-        return validate_ssh_set_name(config, menu.normalize_selection_name(sys.argv[1]))
-
-    return choose_ssh_set_terminal(config)
-
-
-def get_ssh_set(config: dict[str, Any], set_name: str) -> dict[str, Any]:
-    """Return the configuration table for a named SSH set."""
-
-    if set_name.lower() in CANCEL_CHOICES:
-        raise SystemExit(0)
-
-    ssh_sets = get_ssh_sets(config)
-    ssh_cfg = ssh_sets.get(set_name)
-
-    if not isinstance(ssh_cfg, dict):
-        raise ValueError(f"SSH set '{set_name}' was not found in config.yaml")
-
-    return ssh_cfg
-
 
 def required_str(config: dict[str, Any], key: str) -> str:
     """Return a required non-empty string config value."""
@@ -144,7 +85,7 @@ def ensure_section(config: dict[str, Any]) -> None:
         )
         raise SystemExit(1)
 
-    get_ssh_sets(config)
+    config_sets.section_sets(config, CONFIG_SECTION)
 
 
 def report_ssh_error(title: str, message: str) -> None:
@@ -193,8 +134,24 @@ def main() -> None:
 
     cfg = config_utils.load(__file__)
     ensure_section(cfg)
-    set_name = ssh_set_name(cfg)
-    ssh_cfg = get_ssh_set(cfg, set_name)
+    set_name = config_sets.selected_set_name(
+        cfg,
+        CONFIG_SECTION,
+        label="SSH set",
+        header="Available SSH sets:",
+        empty_message=f"No SSH sets configured in config.yaml. Please add an '{CONFIG_SECTION}' section.",
+        prompt="Select SSH set by number or name (or 'exit' to cancel): ",
+        allow_cancel=True,
+    )
+    ssh_cfg = config_sets.get_set_config(
+        cfg,
+        CONFIG_SECTION,
+        set_name,
+        label="SSH set",
+        allow_cancel=True,
+        error_cls=ValueError,
+        not_table_message=f"SSH set '{set_name}' was not found in config.yaml",
+    )
 
     user = required_str(ssh_cfg, "user")
     host = required_str(ssh_cfg, "host")

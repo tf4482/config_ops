@@ -6,14 +6,13 @@ folders based on filesystem creation time.
 """
 
 import shutil
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from winutils_python import config as config_utils
-from winutils_python import connect_smb, menu, visual
+from winutils_python import config_sets, connect_smb, visual
 
 CONFIG_SECTION = "archive_media"
 
@@ -34,13 +33,7 @@ DEFAULT_SECTION = r'''archive_media:
 def config_key(set_name: str, name: str) -> str:
     """Return a dotted config key for human-readable error messages."""
 
-    return f"{CONFIG_SECTION}.{set_name}.{name}"
-
-
-def get_archive_sets(config: dict[str, Any]) -> dict[str, Any]:
-    """Return all configured media archive sets."""
-
-    return config_utils.get_table(config, CONFIG_SECTION)
+    return config_sets.config_key(CONFIG_SECTION, set_name, name)
 
 
 @dataclass(frozen=True)
@@ -72,50 +65,6 @@ class ArchiveMediaError(RuntimeError):
             for result in failed_results
         )
         super().__init__(f"{len(failed_results)} archive media task(s) failed: {summary}")
-
-
-def validate_archive_set_name(config: dict[str, Any], set_name: str) -> str:
-    """Validate a requested archive set name and return it unchanged."""
-
-    archive_sets = get_archive_sets(config)
-
-    if set_name not in archive_sets:
-        available_sets = ", ".join(archive_sets) or "none"
-        raise SystemExit(f"Unknown archive media set '{set_name}'. Available sets: {available_sets}")
-
-    return set_name
-
-
-def archive_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any]:
-    """Return the configuration table for a named archive set."""
-
-    archive_sets = get_archive_sets(config)
-    archive_set = archive_sets.get(set_name)
-
-    if not isinstance(archive_set, dict):
-        raise TypeError(f"Archive media set '{set_name}' must be a table")
-
-    return archive_set
-
-
-def choose_archive_set_terminal(config: dict[str, Any]) -> str:
-    """Prompt the user to choose an archive set from the terminal."""
-
-    archive_sets = get_archive_sets(config)
-    return menu.choose_mapping_key_terminal(
-        archive_sets,
-        header="Available archive media sets:",
-        empty_message=f"No archive media sets configured in config.yaml. Please add an '{CONFIG_SECTION}' section.",
-    )
-
-
-def archive_set_name(config: dict[str, Any]) -> str:
-    """Return the selected archive set from CLI args or the terminal menu."""
-
-    if len(sys.argv) > 1:
-        return validate_archive_set_name(config, menu.normalize_selection_name(sys.argv[1]))
-
-    return choose_archive_set_terminal(config)
 
 
 def get_creation_time(path: Path) -> datetime:
@@ -226,7 +175,7 @@ def ensure_section(config: dict[str, Any]) -> None:
         )
         raise SystemExit(1)
 
-    get_archive_sets(config)
+    config_sets.section_sets(config, CONFIG_SECTION)
 
 
 def config_for_archive_smb(config: dict[str, Any], script_config: dict[str, Any], set_name: str) -> dict[str, Any]:
@@ -284,8 +233,14 @@ def main() -> None:
 
     config = config_utils.load(__file__)
     ensure_section(config)
-    set_name = archive_set_name(config)
-    script_config = archive_set_config(config, set_name)
+    set_name = config_sets.selected_set_name(
+        config,
+        CONFIG_SECTION,
+        label="archive media set",
+        header="Available archive media sets:",
+        empty_message=f"No archive media sets configured in config.yaml. Please add an '{CONFIG_SECTION}' section.",
+    )
+    script_config = config_sets.get_set_config(config, CONFIG_SECTION, set_name, label="Archive media set")
 
     visual.print_start(f"Starting media archive: {set_name}")
     connect_smb.connect_from_config(
