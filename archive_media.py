@@ -168,23 +168,6 @@ def ensure_section(config: dict[str, Any]) -> None:
     config_sets.section_sets(config, CONFIG_SECTION)
 
 
-def config_for_archive_smb(config: dict[str, Any], script_config: dict[str, Any], set_name: str) -> dict[str, Any]:
-    """Return the scoped config used for optional SMB connection setup."""
-
-    archive_smb = script_config.get("smb", False)
-
-    if not isinstance(archive_smb, bool):
-        raise TypeError(f"Configuration value '{config_key(set_name, 'smb')}' must be true or false")
-
-    scoped_config = dict(config)
-
-    if archive_smb:
-        return scoped_config
-
-    scoped_config.pop("smb", None)
-    return scoped_config
-
-
 def run_archive_tasks(tasks: tuple[tuple[Path, Path], ...], extensions: set[str]) -> list[ArchiveTaskResult]:
     """Run archive tasks and collect successes and failures."""
 
@@ -234,7 +217,11 @@ def main() -> None:
 
     visual.print_start(f"Starting media archive: {set_name}")
     connect_smb.connect_from_config(
-        config_for_archive_smb(config, script_config, set_name),
+        connect_smb.scoped_config_for_optional_smb(
+            config,
+            script_config,
+            error_label=f"Configuration value '{config_key(set_name, 'smb')}'",
+        ),
         on_password_prompted=lambda password: connect_smb.store_prompted_password(config, password),
     )
 
