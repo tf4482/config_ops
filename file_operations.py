@@ -4,11 +4,10 @@ The script selects a ``file_operations`` set, optionally connects SMB mappings,
 and delegates mirror/copy/move execution to ``winutils_python.file_ops``.
 """
 
-import sys
 from typing import Any
 
 from winutils_python import config as config_utils
-from winutils_python import connect_smb, file_ops, menu, visual
+from winutils_python import config_sets, connect_smb, file_ops, visual
 
 CONFIG_SECTION = "file_operations"
 
@@ -34,54 +33,10 @@ DEFAULT_SECTION = r'''file_operations:
 '''
 
 
-def get_operation_sets(config: dict[str, Any]) -> dict[str, Any]:
-    """Return all configured file operation sets."""
-
-    return config_utils.get_table(config, CONFIG_SECTION)
-
-
-def validate_operation_set_name(config: dict[str, Any], set_name: str) -> str:
-    """Validate a requested operation set name and return it unchanged."""
-
-    operation_sets = get_operation_sets(config)
-
-    if set_name not in operation_sets:
-        available_sets = ", ".join(operation_sets) or "none"
-        raise SystemExit(f"Unknown file operation set '{set_name}'. Available sets: {available_sets}")
-
-    return set_name
-
-
 def operation_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any]:
     """Return the configuration table for a named operation set."""
 
-    operation_sets = get_operation_sets(config)
-    operation_set = operation_sets.get(set_name)
-
-    if not isinstance(operation_set, dict):
-        raise TypeError(f"File operation set '{set_name}' must be a table")
-
-    return operation_set
-
-
-def choose_operation_set_terminal(config: dict[str, Any]) -> str:
-    """Prompt the user to choose a file operation set from the terminal."""
-
-    operation_sets = get_operation_sets(config)
-    return menu.choose_mapping_key_terminal(
-        operation_sets,
-        header="Available file operation sets:",
-        empty_message=f"No file operation sets configured in config.yaml. Please add a '{CONFIG_SECTION}' section.",
-    )
-
-
-def operation_set_name(config: dict[str, Any]) -> str:
-    """Return the selected operation set from CLI args or the terminal menu."""
-
-    if len(sys.argv) > 1:
-        return validate_operation_set_name(config, menu.normalize_selection_name(sys.argv[1]))
-
-    return choose_operation_set_terminal(config)
+    return config_sets.get_set_config(config, CONFIG_SECTION, set_name, label="File operation set")
 
 
 def ensure_section(config: dict[str, Any]) -> None:
@@ -94,7 +49,7 @@ def ensure_section(config: dict[str, Any]) -> None:
         )
         raise SystemExit(1)
 
-    get_operation_sets(config)
+    config_sets.section_sets(config, CONFIG_SECTION)
 
 
 def config_for_operation_set_smb(config: dict[str, Any], set_name: str) -> dict[str, Any]:
@@ -137,7 +92,13 @@ def main() -> None:
 
     config = config_utils.load(__file__)
     ensure_section(config)
-    set_name = operation_set_name(config)
+    set_name = config_sets.selected_set_name(
+        config,
+        CONFIG_SECTION,
+        label="file operation set",
+        header="Available file operation sets:",
+        empty_message=f"No file operation sets configured in config.yaml. Please add a '{CONFIG_SECTION}' section.",
+    )
 
     visual.print_start(f"Starting file operations: {set_name}")
     connect_smb.connect_from_config(
