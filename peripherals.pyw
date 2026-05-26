@@ -1,3 +1,10 @@
+"""Control URL-backed peripherals and persist their state in the registry.
+
+The script reads configured devices from ``config.yaml``, normalizes command-line
+arguments, stores device state under ``HKEY_CURRENT_USER``, and triggers device
+URLs with ``curl.exe`` without opening terminal windows.
+"""
+
 import subprocess
 import sys
 import winreg
@@ -31,12 +38,16 @@ DEFAULT_SECTION = r'''peripherals:
 
 @dataclass(frozen=True)
 class PeripheralDevice:
+    """A configured peripheral with separate on/off trigger URLs."""
+
     name: str
     on_url: str
     off_url: str
 
 
 def app_dir(script_file: str | Path) -> Path:
+    """Return the directory containing the script or frozen executable."""
+
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
 
@@ -44,14 +55,20 @@ def app_dir(script_file: str | Path) -> Path:
 
 
 def script_dir(script_file: str | Path) -> Path:
+    """Return the directory used for script-local runtime files."""
+
     return app_dir(script_file)
 
 
 def config_path(script_file: str | Path) -> Path:
+    """Return the expected ``config.yaml`` path for this script."""
+
     return script_dir(script_file) / "config.yaml"
 
 
 def find_config_path(script_file: str | Path) -> Path:
+    """Return the config path, creating an empty config file when missing."""
+
     path = config_path(script_file)
 
     if not path.exists():
@@ -61,15 +78,21 @@ def find_config_path(script_file: str | Path) -> Path:
 
 
 def parse_yaml(config_text: str) -> dict[str, Any]:
+    """Parse YAML config text into a dictionary, treating empty files as empty."""
+
     return yaml.safe_load(config_text) or {}
 
 
 def dump_yaml(config: dict[str, Any]) -> str:
+    """Serialize config while omitting internal helper keys."""
+
     clean = {key: value for key, value in config.items() if not key.startswith("__")}
     return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
 
 
 def load_config(script_file: str | Path) -> dict[str, Any]:
+    """Load ``config.yaml`` and attach its path under an internal helper key."""
+
     path = find_config_path(script_file)
     loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
     loaded_config["__config_path__"] = path
@@ -77,6 +100,8 @@ def load_config(script_file: str | Path) -> dict[str, Any]:
 
 
 def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
+    """Append a default YAML section to the loaded config file."""
+
     path = config.get("__config_path__")
 
     if not isinstance(path, Path):
@@ -89,6 +114,8 @@ def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
 
 
 def replace_or_add_string_value(path: Path, table: str, key: str, value: str) -> None:
+    """Replace or add a string value inside a top-level config table."""
+
     loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
     table_config = loaded_config.setdefault(table, {})
 
@@ -100,6 +127,8 @@ def replace_or_add_string_value(path: Path, table: str, key: str, value: str) ->
 
 
 def remove_value(path: Path, table: str, key: str) -> None:
+    """Remove a key from a top-level config table when it exists."""
+
     loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
     table_config = loaded_config.get(table, {})
 
@@ -109,6 +138,8 @@ def remove_value(path: Path, table: str, key: str) -> None:
 
 
 def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
+    """Return a top-level config table or raise when the value is not a table."""
+
     value = config.get(name, {})
 
     if not isinstance(value, dict):
@@ -118,10 +149,14 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
 
 
 def normalize_argument(argument: str) -> str:
+    """Normalize CLI device and command arguments."""
+
     return argument.strip().lower().lstrip("/-")
 
 
 def ensure_section(config: dict[str, Any]) -> None:
+    """Ensure the peripherals section exists and has table shape."""
+
     if CONFIG_SECTION not in config:
         append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning(
@@ -134,14 +169,20 @@ def ensure_section(config: dict[str, Any]) -> None:
 
 
 def peripherals_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Return the top-level peripherals configuration table."""
+
     return get_table(config, CONFIG_SECTION)
 
 
 def config_key(name: str) -> str:
+    """Return a dotted config key for human-readable error messages."""
+
     return f"{CONFIG_SECTION}.{name}"
 
 
 def registry_path_from_config(peripherals: dict[str, Any]) -> str:
+    """Return the registry path used to persist peripheral state."""
+
     registry_path = str(peripherals.get(REGISTRY_PATH_KEY, "")).strip()
 
     if not registry_path:
@@ -151,6 +192,8 @@ def registry_path_from_config(peripherals: dict[str, Any]) -> str:
 
 
 def devices_from_config(peripherals: dict[str, Any]) -> dict[str, PeripheralDevice]:
+    """Build configured peripheral devices keyed by normalized device name."""
+
     devices: dict[str, PeripheralDevice] = {}
 
     for name, value in peripherals.items():
@@ -183,6 +226,8 @@ def devices_from_config(peripherals: dict[str, Any]) -> dict[str, PeripheralDevi
 
 
 def read_device_state(registry_path: str, device: str) -> bool:
+    """Read a peripheral state value from ``HKEY_CURRENT_USER``."""
+
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path) as key:
             value, _ = winreg.QueryValueEx(key, device)
@@ -192,11 +237,15 @@ def read_device_state(registry_path: str, device: str) -> bool:
 
 
 def write_device_state(registry_path: str, device: str, enabled: bool) -> None:
+    """Persist a peripheral state value under ``HKEY_CURRENT_USER``."""
+
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, registry_path) as key:
         winreg.SetValueEx(key, device, 0, winreg.REG_DWORD, 1 if enabled else 0)
 
 
 def subprocess_creationflags() -> int:
+    """Return Windows no-console creation flags for background URL triggers."""
+
     if sys.platform == "win32":
         return CREATE_NO_WINDOW
 
@@ -204,6 +253,8 @@ def subprocess_creationflags() -> int:
 
 
 def trigger_url(url: str) -> None:
+    """Trigger a device URL with ``curl.exe`` in the background."""
+
     subprocess.Popen(
         ["curl.exe", url],
         cwd=script_dir(__file__),
@@ -214,16 +265,22 @@ def trigger_url(url: str) -> None:
 
 
 def turn_device_on(registry_path: str, device: PeripheralDevice) -> None:
+    """Persist a device as enabled and trigger its on URL."""
+
     write_device_state(registry_path, device.name, True)
     trigger_url(device.on_url)
 
 
 def turn_device_off(registry_path: str, device: PeripheralDevice) -> None:
+    """Persist a device as disabled and trigger its off URL."""
+
     write_device_state(registry_path, device.name, False)
     trigger_url(device.off_url)
 
 
 def toggle_device(registry_path: str, device: PeripheralDevice) -> None:
+    """Toggle a device based on its persisted state."""
+
     if read_device_state(registry_path, device.name):
         turn_device_off(registry_path, device)
         return
@@ -232,10 +289,14 @@ def toggle_device(registry_path: str, device: PeripheralDevice) -> None:
 
 
 def suspend_device(device: PeripheralDevice) -> None:
+    """Trigger a device off without changing persisted state."""
+
     trigger_url(device.off_url)
 
 
 def resume_device(registry_path: str, device: PeripheralDevice) -> None:
+    """Trigger the URL matching the device's persisted state."""
+
     if read_device_state(registry_path, device.name):
         trigger_url(device.on_url)
         return
@@ -244,6 +305,8 @@ def resume_device(registry_path: str, device: PeripheralDevice) -> None:
 
 
 def run_device_command(registry_path: str, device: PeripheralDevice, command: str) -> None:
+    """Run one supported command for one peripheral device."""
+
     if command == "on":
         turn_device_on(registry_path, device)
     elif command == "off":
@@ -262,6 +325,8 @@ def parse_arguments(
     arguments: list[str],
     devices: dict[str, PeripheralDevice],
 ) -> tuple[list[PeripheralDevice], str]:
+    """Parse normalized CLI arguments into selected devices and command."""
+
     selected_device_names: list[str] = []
     command = DEFAULT_COMMAND
 
@@ -291,6 +356,8 @@ def parse_arguments(
 
 
 def main() -> None:
+    """Run the requested peripheral command for selected devices."""
+
     config = load_config(__file__)
     ensure_section(config)
 
