@@ -101,6 +101,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+release/
 eggs/
 lib/
 lib64/
@@ -165,3 +166,4 @@ logs/
 push.bat
 vendor/
 *spec
+deploy.py
