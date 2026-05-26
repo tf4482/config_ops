@@ -22,59 +22,6 @@ DEFAULT_SECTION = r'''ssh:
     command: 'ls'
 '''
 
-def required_str(config: dict[str, Any], key: str) -> str:
-    """Return a required non-empty string config value."""
-
-    value = config.get(key)
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"SSH config value '{key}' must be a non-empty string")
-
-    return value
-
-
-def required_port(config: dict[str, Any]) -> int:
-    """Return and validate the configured SSH port."""
-
-    value = config.get("port")
-    port: int
-
-    if isinstance(value, int):
-        port = value
-    elif isinstance(value, str) and value.isdigit():
-        port = int(value)
-    else:
-        raise ValueError("SSH config value 'port' must be an integer")
-
-    if not 1 <= port <= 65535:
-        raise ValueError("SSH config value 'port' must be in range 1..65535")
-
-    return port
-
-
-def optional_timeout(config: dict[str, Any]) -> float | None:
-    """Return the optional positive SSH timeout in seconds."""
-
-    value = config.get("timeout")
-
-    if value is None:
-        return None
-
-    if isinstance(value, int | float):
-        timeout = float(value)
-    elif isinstance(value, str):
-        try:
-            timeout = float(value)
-        except ValueError as error:
-            raise ValueError("SSH config value 'timeout' must be a positive number") from error
-    else:
-        raise ValueError("SSH config value 'timeout' must be a positive number")
-
-    if timeout <= 0:
-        raise ValueError("SSH config value 'timeout' must be greater than 0")
-
-    return timeout
-
-
 def ensure_section(config: dict[str, Any]) -> None:
     """Ensure the SSH section exists and has table shape."""
 
@@ -153,11 +100,17 @@ def main() -> None:
         not_table_message=f"SSH set '{set_name}' was not found in config.yaml",
     )
 
-    user = required_str(ssh_cfg, "user")
-    host = required_str(ssh_cfg, "host")
-    port = required_port(ssh_cfg)
-    timeout = optional_timeout(ssh_cfg)
-    command = required_str(ssh_cfg, "command")
+    user = config_utils.required_str(ssh_cfg, "user", label="SSH config value 'user'")
+    host = config_utils.required_str(ssh_cfg, "host", label="SSH config value 'host'")
+    port = config_utils.required_int_in_range(
+        ssh_cfg,
+        "port",
+        label="SSH config value 'port'",
+        minimum=1,
+        maximum=65535,
+    )
+    timeout = config_utils.optional_positive_float(ssh_cfg, "timeout", label="SSH config value 'timeout'")
+    command = config_utils.required_str(ssh_cfg, "command", label="SSH config value 'command'")
 
     visual.print_start(f"Starting SSH task: {set_name}")
     run_ssh_task(set_name, user, host, port, command, timeout)
