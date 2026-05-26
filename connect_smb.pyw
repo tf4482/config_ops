@@ -1,3 +1,10 @@
+"""Connect SMB network shares defined in the project config file.
+
+This GUI-friendly entry script loads the top-level ``smb`` configuration,
+delegates mapping work to ``winutils_python.connect_smb``, and persists prompted
+passwords in obfuscated form for later runs.
+"""
+
 import sys
 from pathlib import Path
 from typing import Any
@@ -22,6 +29,8 @@ DEFAULT_SECTION = r'''smb:
 
 
 def script_dir(script_file: str | Path) -> Path:
+    """Return the directory containing the script or frozen executable."""
+
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
 
@@ -29,10 +38,14 @@ def script_dir(script_file: str | Path) -> Path:
 
 
 def config_path(script_file: str | Path) -> Path:
+    """Return the expected ``config.yaml`` path for this script."""
+
     return script_dir(script_file) / "config.yaml"
 
 
 def find_config_path(script_file: str | Path) -> Path:
+    """Return the config path, creating an empty config file when missing."""
+
     path = config_path(script_file)
 
     if not path.exists():
@@ -42,6 +55,8 @@ def find_config_path(script_file: str | Path) -> Path:
 
 
 def load(script_file: str | Path) -> dict[str, Any]:
+    """Load ``config.yaml`` and attach its path under an internal helper key."""
+
     path = find_config_path(script_file)
     loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
 
@@ -53,6 +68,8 @@ def load(script_file: str | Path) -> dict[str, Any]:
 
 
 def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
+    """Append a default YAML section to the loaded config file."""
+
     path = config.get("__config_path__")
 
     if not isinstance(path, Path):
@@ -64,6 +81,8 @@ def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
 
 
 def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
+    """Replace or add a string value inside a top-level config table."""
+
     loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
     table_config = loaded_config.setdefault(table, {})
 
@@ -75,6 +94,8 @@ def replace_or_add_string_value(config_path: Path, table: str, key: str, value: 
 
 
 def remove_value(config_path: Path, table: str, key: str) -> None:
+    """Remove a key from a top-level config table when it exists."""
+
     loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
     table_config = loaded_config.get(table, {})
 
@@ -84,15 +105,21 @@ def remove_value(config_path: Path, table: str, key: str) -> None:
 
 
 def parse_yaml(config_text: str) -> dict[str, Any]:
+    """Parse YAML config text into a dictionary, treating empty files as empty."""
+
     return yaml.safe_load(config_text) or {}
 
 
 def dump_yaml(config: dict[str, Any]) -> str:
+    """Serialize config while omitting internal helper keys."""
+
     clean = {key: value for key, value in config.items() if not key.startswith("__")}
     return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
 
 
 def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
+    """Return a top-level config table or raise when the value is not a table."""
+
     value = config.get(name, {})
 
     if not isinstance(value, dict):
@@ -102,6 +129,8 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
 
 
 def ensure_section(config: dict[str, Any]) -> None:
+    """Ensure the SMB section exists and has table shape."""
+
     if CONFIG_SECTION not in config:
         append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning(
@@ -115,6 +144,8 @@ def ensure_section(config: dict[str, Any]) -> None:
 
 
 def store_prompted_smb_password(config: dict[str, Any], password: str) -> None:
+    """Persist a prompted SMB password and remove legacy password fields."""
+
     config_path = config.get("__config_path__")
 
     if config_path is None:
@@ -131,6 +162,8 @@ def store_prompted_smb_password(config: dict[str, Any], password: str) -> None:
 
 
 def main() -> None:
+    """Connect all configured top-level SMB mappings."""
+
     config = load(__file__)
     ensure_section(config)
     results = connect_smb.connect_from_config(
