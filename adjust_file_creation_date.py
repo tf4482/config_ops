@@ -1,3 +1,10 @@
+"""Adjust Windows file timestamps from date/time values parsed from filenames.
+
+The script reads named configuration sets from ``config.yaml``, optionally connects
+SMB mappings, copies files when requested, and applies parsed timestamps as
+creation, access, and modification times through the Win32 ``SetFileTime`` API.
+"""
+
 import re
 import shutil
 import sys
@@ -62,6 +69,8 @@ kernel32.CloseHandle.restype = c_bool
 
 @dataclass(frozen=True)
 class FileAdjustmentResult:
+    """Result for a single source file processed by the adjustment workflow."""
+
     source: Path
     destination: Path | None = None
     timestamp: datetime | None = None
@@ -70,11 +79,17 @@ class FileAdjustmentResult:
 
     @property
     def failed(self) -> bool:
+        """Return whether this file failed during processing."""
+
         return self.error is not None
 
 
 class FileCreationDateAdjustmentError(RuntimeError):
+    """Raised after processing when one or more file adjustments failed."""
+
     def __init__(self, results: list[FileAdjustmentResult]) -> None:
+        """Build a summary error from failed adjustment results."""
+
         self.results = results
         failed_results = [result for result in results if result.failed]
         summary = ", ".join(f"{result.source}: {result.error}" for result in failed_results)
@@ -82,6 +97,8 @@ class FileCreationDateAdjustmentError(RuntimeError):
 
 
 def app_dir(script_file: str | Path) -> Path:
+    """Return the directory containing the script or frozen executable."""
+
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
 
@@ -89,14 +106,20 @@ def app_dir(script_file: str | Path) -> Path:
 
 
 def script_dir(script_file: str | Path) -> Path:
+    """Return the directory used for script-local runtime files."""
+
     return app_dir(script_file)
 
 
 def config_path(script_file: str | Path) -> Path:
+    """Return the expected ``config.yaml`` path for this script."""
+
     return script_dir(script_file) / "config.yaml"
 
 
 def find_config_path(script_file: str | Path) -> Path:
+    """Return the config path, creating an empty config file when missing."""
+
     path = config_path(script_file)
 
     if not path.exists():
@@ -106,15 +129,21 @@ def find_config_path(script_file: str | Path) -> Path:
 
 
 def parse_yaml(config_text: str) -> dict[str, Any]:
+    """Parse YAML config text into a dictionary, treating empty files as empty."""
+
     return yaml.safe_load(config_text) or {}
 
 
 def dump_yaml(config: dict[str, Any]) -> str:
+    """Serialize config while omitting internal helper keys."""
+
     clean = {key: value for key, value in config.items() if not key.startswith("__")}
     return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
 
 
 def load_config(script_file: str | Path) -> dict[str, Any]:
+    """Load ``config.yaml`` and attach its path under an internal helper key."""
+
     path = find_config_path(script_file)
     loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
     loaded_config["__config_path__"] = path
@@ -122,6 +151,8 @@ def load_config(script_file: str | Path) -> dict[str, Any]:
 
 
 def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
+    """Append a default YAML section to the loaded config file."""
+
     path = config.get("__config_path__")
 
     if not isinstance(path, Path):
@@ -133,6 +164,8 @@ def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
 
 
 def replace_or_add_string_value(path: Path, table: str, key: str, value: str) -> None:
+    """Replace or add a string value inside a top-level config table."""
+
     loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
     table_config = loaded_config.setdefault(table, {})
 
@@ -144,6 +177,8 @@ def replace_or_add_string_value(path: Path, table: str, key: str, value: str) ->
 
 
 def remove_value(path: Path, table: str, key: str) -> None:
+    """Remove a key from a top-level config table when it exists."""
+
     loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
     table_config = loaded_config.get(table, {})
 
@@ -153,6 +188,8 @@ def remove_value(path: Path, table: str, key: str) -> None:
 
 
 def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
+    """Return a top-level config table or raise when the value is not a table."""
+
     value = config.get(name, {})
 
     if not isinstance(value, dict):
@@ -162,6 +199,8 @@ def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
 
 
 def ensure_section(config: dict[str, Any]) -> None:
+    """Ensure the adjustment section exists and has table shape."""
+
     if CONFIG_SECTION not in config:
         append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning(
@@ -174,14 +213,20 @@ def ensure_section(config: dict[str, Any]) -> None:
 
 
 def config_key(set_name: str, name: str) -> str:
+    """Return a human-readable dotted config key for error messages."""
+
     return f"{CONFIG_SECTION}.{set_name}.{name}"
 
 
 def get_adjustment_sets(config: dict[str, Any]) -> dict[str, Any]:
+    """Return all configured file creation date adjustment sets."""
+
     return get_table(config, CONFIG_SECTION)
 
 
 def validate_adjustment_set_name(config: dict[str, Any], set_name: str) -> str:
+    """Validate a requested adjustment set name and return it unchanged."""
+
     adjustment_sets = get_adjustment_sets(config)
 
     if set_name not in adjustment_sets:
@@ -195,6 +240,8 @@ def validate_adjustment_set_name(config: dict[str, Any], set_name: str) -> str:
 
 
 def adjustment_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any]:
+    """Return the configuration table for a named adjustment set."""
+
     adjustment_sets = get_adjustment_sets(config)
     adjustment_set = adjustment_sets.get(set_name)
 
@@ -205,6 +252,8 @@ def adjustment_set_config(config: dict[str, Any], set_name: str) -> dict[str, An
 
 
 def choose_adjustment_set_terminal(config: dict[str, Any]) -> str:
+    """Prompt the user to choose an adjustment set from the terminal."""
+
     adjustment_sets = get_adjustment_sets(config)
     return menu.choose_mapping_key_terminal(
         adjustment_sets,
@@ -217,6 +266,8 @@ def choose_adjustment_set_terminal(config: dict[str, Any]) -> str:
 
 
 def adjustment_set_name(config: dict[str, Any]) -> str:
+    """Return the selected adjustment set from CLI args or the terminal menu."""
+
     if len(sys.argv) > 1:
         return validate_adjustment_set_name(config, menu.normalize_selection_name(sys.argv[1]))
 
@@ -224,6 +275,8 @@ def adjustment_set_name(config: dict[str, Any]) -> str:
 
 
 def registry_path_from_config(script_config: dict[str, Any], set_name: str) -> str:
+    """Return the registry path used by related SMB/peripheral integrations."""
+
     registry_path = str(script_config.get("smb_registry_path", DEFAULT_SMB_REGISTRY_PATH)).strip()
 
     if not registry_path:
@@ -233,14 +286,20 @@ def registry_path_from_config(script_config: dict[str, Any], set_name: str) -> s
 
 
 def source_folder_from_config(script_config: dict[str, Any]) -> Path:
+    """Return the source folder configured for the adjustment set."""
+
     return Path(str(script_config["source_folder"]))
 
 
 def change_files_in_place_from_config(script_config: dict[str, Any]) -> bool:
+    """Return whether matching files should be modified in place."""
+
     return bool(script_config.get("change_files_in_place", True))
 
 
 def overwrite_from_config(script_config: dict[str, Any]) -> bool:
+    """Return whether copied target files may be overwritten."""
+
     return bool(script_config.get("overwrite", False))
 
 
@@ -249,6 +308,8 @@ def target_folder_from_config(
     source_folder: Path,
     change_files_in_place: bool,
 ) -> Path:
+    """Return the destination folder for copied files."""
+
     if change_files_in_place:
         return source_folder
 
@@ -261,10 +322,14 @@ def target_folder_from_config(
 
 
 def hour_adjustment_from_config(script_config: dict[str, Any]) -> int:
+    """Return the configured hour offset applied to parsed timestamps."""
+
     return int(script_config.get("hour_adjustment", 0))
 
 
 def read_config_list(script_config: dict[str, Any], set_name: str, name: str) -> list[Any]:
+    """Read and validate a required non-empty list from a set config."""
+
     value = script_config.get(name, [])
 
     if not isinstance(value, list):
@@ -277,6 +342,8 @@ def read_config_list(script_config: dict[str, Any], set_name: str, name: str) ->
 
 
 def get_file_extensions(script_config: dict[str, Any], set_name: str) -> set[str]:
+    """Return normalized lowercase file extensions to process."""
+
     extensions = read_config_list(script_config, set_name, "extensions")
     normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
 
@@ -287,6 +354,8 @@ def get_file_extensions(script_config: dict[str, Any], set_name: str) -> set[str
 
 
 def get_patterns(script_config: dict[str, Any], set_name: str) -> list[re.Pattern[str]]:
+    """Compile and validate configured filename timestamp regex patterns."""
+
     pattern_configs = read_config_list(script_config, set_name, "patterns")
 
     compiled_patterns: list[re.Pattern] = []
@@ -316,16 +385,22 @@ def get_patterns(script_config: dict[str, Any], set_name: str) -> list[re.Patter
 
 
 def datetime_to_filetime(timestamp: datetime) -> tuple[int, int]:
+    """Convert a Python datetime into low/high Windows FILETIME integers."""
+
     utc_timestamp = timestamp.astimezone(timezone.utc)
     ticks = int((utc_timestamp - WINDOWS_EPOCH).total_seconds() * WINDOWS_TICK)
     return ticks & 0xFFFFFFFF, ticks >> 32
 
 
 class FileTime(Structure):
+    """ctypes representation of the Win32 FILETIME structure."""
+
     _fields_ = (("dwLowDateTime", c_uint32), ("dwHighDateTime", c_uint32))
 
 
 def set_file_times(path: Path, timestamp: datetime) -> None:
+    """Set creation, access, and modification times for a Windows file."""
+
     low_date_time, high_date_time = datetime_to_filetime(timestamp)
     filetime = FileTime(low_date_time, high_date_time)
     handle = kernel32.CreateFileW(
@@ -350,6 +425,8 @@ def set_file_times(path: Path, timestamp: datetime) -> None:
 
 
 def parse_timestamp(path: Path, patterns: list[re.Pattern[str]], hour_adjustment: int) -> datetime | None:
+    """Parse a timestamp from a filename using the first matching pattern."""
+
     file_name_no_ext = path.stem
 
     for pattern in patterns:
@@ -387,6 +464,8 @@ def parse_timestamp(path: Path, patterns: list[re.Pattern[str]], hour_adjustment
 
 
 def prepare_target_folder(change_files_in_place: bool, target_folder: Path) -> None:
+    """Create the target folder when files are copied before modification."""
+
     if change_files_in_place:
         return
 
@@ -394,6 +473,8 @@ def prepare_target_folder(change_files_in_place: bool, target_folder: Path) -> N
 
 
 def collision_safe_path(path: Path) -> Path:
+    """Return a non-existing path by appending a numeric suffix when needed."""
+
     if not path.exists():
         return path
 
@@ -412,6 +493,8 @@ def prepare_destination(
     target_folder: Path,
     overwrite: bool,
 ) -> Path | None:
+    """Return the file to update, copying it first when not modifying in place."""
+
     if change_files_in_place:
         return source_file
 
@@ -429,6 +512,8 @@ def prepare_destination(
 
 
 def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileAdjustmentResult]:
+    """Process all matching files for one adjustment set and collect results."""
+
     source_folder = source_folder_from_config(script_config)
     change_files_in_place = change_files_in_place_from_config(script_config)
     overwrite = overwrite_from_config(script_config)
@@ -471,6 +556,8 @@ def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileA
 
 
 def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
+    """Print a compact summary of successful and failed file adjustments."""
+
     failed_results = [result for result in results if result.failed]
     changed_count = sum(1 for result in results if result.changed)
 
@@ -485,6 +572,8 @@ def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
 
 
 def store_prompted_smb_password(config: dict, password: str) -> None:
+    """Persist a prompted SMB password and remove legacy password fields."""
+
     config_path = config.get("__config_path__")
 
     if config_path is None:
@@ -501,6 +590,8 @@ def store_prompted_smb_password(config: dict, password: str) -> None:
 
 
 def config_for_adjust_smb(config: dict, script_config: dict, set_name: str) -> dict:
+    """Return the scoped config used for optional SMB connection setup."""
+
     adjust_smb = script_config.get("smb", False)
 
     if not isinstance(adjust_smb, bool):
@@ -516,6 +607,8 @@ def config_for_adjust_smb(config: dict, script_config: dict, set_name: str) -> d
 
 
 def main() -> None:
+    """Run the selected file creation date adjustment set."""
+
     config = load_config(__file__)
     ensure_section(config)
     set_name = adjustment_set_name(config)
