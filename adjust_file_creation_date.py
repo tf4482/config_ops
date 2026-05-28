@@ -7,16 +7,14 @@ creation, access, and modification times through the Win32 ``SetFileTime`` API.
 
 import re
 import shutil
-import sys
 from ctypes import Structure, WinDLL, byref, c_bool, c_uint32, c_void_p, c_wchar_p
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from winutils_python import connect_smb, menu, visual
+from winutils_python import config as config_utils
+from winutils_python import config_sets, connect_smb, visual
 
 
 DEFAULT_SECTION = r'''adjust_file_creation_date:
@@ -95,159 +93,24 @@ class FileCreationDateAdjustmentError(RuntimeError):
         summary = ", ".join(f"{result.source}: {result.error}" for result in failed_results)
         super().__init__(f"{len(failed_results)} file creation date adjustment(s) failed: {summary}")
 
-
-def app_dir(script_file: str | Path) -> Path:
-    """Return the directory containing the script or frozen executable."""
-
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-
-    return Path(script_file).resolve().parent
-
-
-def script_dir(script_file: str | Path) -> Path:
-    """Return the directory used for script-local runtime files."""
-
-    return app_dir(script_file)
-
-
-def config_path(script_file: str | Path) -> Path:
-    """Return the expected ``config.yaml`` path for this script."""
-
-    return script_dir(script_file) / "config.yaml"
-
-
-def find_config_path(script_file: str | Path) -> Path:
-    """Return the config path, creating an empty config file when missing."""
-
-    path = config_path(script_file)
-
-    if not path.exists():
-        path.write_text("", encoding="utf-8")
-
-    return path
-
-
-def parse_yaml(config_text: str) -> dict[str, Any]:
-    """Parse YAML config text into a dictionary, treating empty files as empty."""
-
-    return yaml.safe_load(config_text) or {}
-
-
-def dump_yaml(config: dict[str, Any]) -> str:
-    """Serialize config while omitting internal helper keys."""
-
-    clean = {key: value for key, value in config.items() if not key.startswith("__")}
-    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
-
-
-def load_config(script_file: str | Path) -> dict[str, Any]:
-    """Load ``config.yaml`` and attach its path under an internal helper key."""
-
-    path = find_config_path(script_file)
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-    loaded_config["__config_path__"] = path
-    return loaded_config
-
-
-def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
-    """Append a default YAML section to the loaded config file."""
-
-    path = config.get("__config_path__")
-
-    if not isinstance(path, Path):
-        return
-
-    existing = path.read_text(encoding="utf-8").rstrip()
-    separator = "\n\n" if existing else ""
-    path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
-
-
-def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
-    """Return a top-level config table or raise when the value is not a table."""
-
-    value = config.get(name, {})
-
-    if not isinstance(value, dict):
-        raise TypeError(f"Configuration value '{name}' must be a table")
-
-    return value
-
-
 def ensure_section(config: dict[str, Any]) -> None:
     """Ensure the adjustment section exists and has table shape."""
 
     if CONFIG_SECTION not in config:
-        append_section_yaml(config, DEFAULT_SECTION)
+        config_utils.append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning(
             f"Added default '{CONFIG_SECTION}' section to config.yaml. "
             "Please configure it before running."
         )
         raise SystemExit(1)
 
-    get_adjustment_sets(config)
+    config_sets.section_sets(config, CONFIG_SECTION)
 
 
 def config_key(set_name: str, name: str) -> str:
     """Return a human-readable dotted config key for error messages."""
 
-    return f"{CONFIG_SECTION}.{set_name}.{name}"
-
-
-def get_adjustment_sets(config: dict[str, Any]) -> dict[str, Any]:
-    """Return all configured file creation date adjustment sets."""
-
-    return get_table(config, CONFIG_SECTION)
-
-
-def validate_adjustment_set_name(config: dict[str, Any], set_name: str) -> str:
-    """Validate a requested adjustment set name and return it unchanged."""
-
-    adjustment_sets = get_adjustment_sets(config)
-
-    if set_name not in adjustment_sets:
-        available_sets = ", ".join(adjustment_sets) or "none"
-        raise SystemExit(
-            f"Unknown file creation date adjustment set '{set_name}'. "
-            f"Available sets: {available_sets}"
-        )
-
-    return set_name
-
-
-def adjustment_set_config(config: dict[str, Any], set_name: str) -> dict[str, Any]:
-    """Return the configuration table for a named adjustment set."""
-
-    adjustment_sets = get_adjustment_sets(config)
-    adjustment_set = adjustment_sets.get(set_name)
-
-    if not isinstance(adjustment_set, dict):
-        raise TypeError(f"File creation date adjustment set '{set_name}' must be a table")
-
-    return adjustment_set
-
-
-def choose_adjustment_set_terminal(config: dict[str, Any]) -> str:
-    """Prompt the user to choose an adjustment set from the terminal."""
-
-    adjustment_sets = get_adjustment_sets(config)
-    return menu.choose_mapping_key_terminal(
-        adjustment_sets,
-        header="Available file creation date adjustment sets:",
-        empty_message=(
-            "No file creation date adjustment sets configured in config.yaml. "
-            f"Please add an '{CONFIG_SECTION}' section."
-        ),
-    )
-
-
-def adjustment_set_name(config: dict[str, Any]) -> str:
-    """Return the selected adjustment set from CLI args or the terminal menu."""
-
-    if len(sys.argv) > 1:
-        return validate_adjustment_set_name(config, menu.normalize_selection_name(sys.argv[1]))
-
-    return choose_adjustment_set_terminal(config)
+    return config_sets.config_key(CONFIG_SECTION, set_name, name)
 
 
 def registry_path_from_config(script_config: dict[str, Any], set_name: str) -> str:
@@ -303,36 +166,26 @@ def hour_adjustment_from_config(script_config: dict[str, Any]) -> int:
     return int(script_config.get("hour_adjustment", 0))
 
 
-def read_config_list(script_config: dict[str, Any], set_name: str, name: str) -> list[Any]:
-    """Read and validate a required non-empty list from a set config."""
-
-    value = script_config.get(name, [])
-
-    if not isinstance(value, list):
-        raise TypeError(f"Configuration value '{config_key(set_name, name)}' must be a list")
-
-    if not value:
-        raise ValueError(f"Configuration value '{config_key(set_name, name)}' must define at least one entry")
-
-    return value
-
-
 def get_file_extensions(script_config: dict[str, Any], set_name: str) -> set[str]:
     """Return normalized lowercase file extensions to process."""
 
-    extensions = read_config_list(script_config, set_name, "extensions")
-    normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
-
-    if not normalized_extensions:
-        raise ValueError(f"Configuration value '{config_key(set_name, 'extensions')}' must define at least one extension")
-
-    return normalized_extensions
+    return config_utils.normalized_extension_set(
+        script_config,
+        "extensions",
+        label=config_key(set_name, "extensions"),
+        non_empty=True,
+    )
 
 
 def get_patterns(script_config: dict[str, Any], set_name: str) -> list[re.Pattern[str]]:
     """Compile and validate configured filename timestamp regex patterns."""
 
-    pattern_configs = read_config_list(script_config, set_name, "patterns")
+    pattern_configs = config_utils.required_list(
+        script_config,
+        "patterns",
+        label=config_key(set_name, "patterns"),
+        non_empty=True,
+    )
 
     compiled_patterns: list[re.Pattern] = []
     for index, pattern_config in enumerate(pattern_configs, start=1):
@@ -547,34 +400,35 @@ def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
         visual.print_error(f"Failed timestamp update: {result.source}: {result.error}")
 
 
-def config_for_adjust_smb(config: dict, script_config: dict, set_name: str) -> dict:
-    """Return the scoped config used for optional SMB connection setup."""
-
-    adjust_smb = script_config.get("smb", False)
-
-    if not isinstance(adjust_smb, bool):
-        raise TypeError(f"Configuration value '{config_key(set_name, 'smb')}' must be true or false")
-
-    scoped_config = dict(config)
-
-    if adjust_smb:
-        return scoped_config
-
-    scoped_config.pop("smb", None)
-    return scoped_config
-
-
 def main() -> None:
     """Run the selected file creation date adjustment set."""
 
-    config = load_config(__file__)
+    config = config_utils.load(__file__)
     ensure_section(config)
-    set_name = adjustment_set_name(config)
-    script_config = adjustment_set_config(config, set_name)
+    set_name = config_sets.selected_set_name(
+        config,
+        CONFIG_SECTION,
+        label="file creation date adjustment set",
+        header="Available file creation date adjustment sets:",
+        empty_message=(
+            "No file creation date adjustment sets configured in config.yaml. "
+            f"Please add an '{CONFIG_SECTION}' section."
+        ),
+    )
+    script_config = config_sets.get_set_config(
+        config,
+        CONFIG_SECTION,
+        set_name,
+        label="File creation date adjustment set",
+    )
 
     visual.print_start(f"Starting file creation date adjustment: {set_name}")
     connect_smb.connect_from_config(
-        config_for_adjust_smb(config, script_config, set_name),
+        connect_smb.scoped_config_for_optional_smb(
+            config,
+            script_config,
+            error_label=f"Configuration value '{config_key(set_name, 'smb')}'",
+        ),
         on_password_prompted=lambda password: connect_smb.store_prompted_password(config, password),
     )
 
