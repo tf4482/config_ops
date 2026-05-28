@@ -9,11 +9,9 @@ import subprocess
 import sys
 import winreg
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-import yaml
-
+from winutils_python import config as config_utils
 from winutils_python import visual
 
 
@@ -44,110 +42,6 @@ class PeripheralDevice:
     on_url: str
     off_url: str
 
-
-def app_dir(script_file: str | Path) -> Path:
-    """Return the directory containing the script or frozen executable."""
-
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-
-    return Path(script_file).resolve().parent
-
-
-def script_dir(script_file: str | Path) -> Path:
-    """Return the directory used for script-local runtime files."""
-
-    return app_dir(script_file)
-
-
-def config_path(script_file: str | Path) -> Path:
-    """Return the expected ``config.yaml`` path for this script."""
-
-    return script_dir(script_file) / "config.yaml"
-
-
-def find_config_path(script_file: str | Path) -> Path:
-    """Return the config path, creating an empty config file when missing."""
-
-    path = config_path(script_file)
-
-    if not path.exists():
-        path.write_text("", encoding="utf-8")
-
-    return path
-
-
-def parse_yaml(config_text: str) -> dict[str, Any]:
-    """Parse YAML config text into a dictionary, treating empty files as empty."""
-
-    return yaml.safe_load(config_text) or {}
-
-
-def dump_yaml(config: dict[str, Any]) -> str:
-    """Serialize config while omitting internal helper keys."""
-
-    clean = {key: value for key, value in config.items() if not key.startswith("__")}
-    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
-
-
-def load_config(script_file: str | Path) -> dict[str, Any]:
-    """Load ``config.yaml`` and attach its path under an internal helper key."""
-
-    path = find_config_path(script_file)
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-    loaded_config["__config_path__"] = path
-    return loaded_config
-
-
-def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
-    """Append a default YAML section to the loaded config file."""
-
-    path = config.get("__config_path__")
-
-    if not isinstance(path, Path):
-        return
-
-    existing = path.read_text(encoding="utf-8").rstrip()
-    separator = "\n\n" if existing else ""
-
-    path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
-
-
-def replace_or_add_string_value(path: Path, table: str, key: str, value: str) -> None:
-    """Replace or add a string value inside a top-level config table."""
-
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-    table_config = loaded_config.setdefault(table, {})
-
-    if not isinstance(table_config, dict):
-        raise TypeError(f"Configuration value '{table}' must be a table")
-
-    table_config[key] = value
-    path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def remove_value(path: Path, table: str, key: str) -> None:
-    """Remove a key from a top-level config table when it exists."""
-
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-    table_config = loaded_config.get(table, {})
-
-    if isinstance(table_config, dict) and key in table_config:
-        del table_config[key]
-        path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
-    """Return a top-level config table or raise when the value is not a table."""
-
-    value = config.get(name, {})
-
-    if not isinstance(value, dict):
-        raise TypeError(f"Configuration value '{name}' must be a table")
-
-    return value
-
-
 def normalize_argument(argument: str) -> str:
     """Normalize CLI device and command arguments."""
 
@@ -158,7 +52,7 @@ def ensure_section(config: dict[str, Any]) -> None:
     """Ensure the peripherals section exists and has table shape."""
 
     if CONFIG_SECTION not in config:
-        append_section_yaml(config, DEFAULT_SECTION)
+        config_utils.append_section_yaml(config, DEFAULT_SECTION)
         visual.print_warning(
             f"Added default '{CONFIG_SECTION}' section to config.yaml. "
             "Please configure the device URLs before running."
@@ -171,7 +65,7 @@ def ensure_section(config: dict[str, Any]) -> None:
 def peripherals_config(config: dict[str, Any]) -> dict[str, Any]:
     """Return the top-level peripherals configuration table."""
 
-    return get_table(config, CONFIG_SECTION)
+    return config_utils.get_table(config, CONFIG_SECTION)
 
 
 def config_key(name: str) -> str:
@@ -257,7 +151,7 @@ def trigger_url(url: str) -> None:
 
     subprocess.Popen(
         ["curl.exe", url],
-        cwd=script_dir(__file__),
+        cwd=config_utils.script_dir(__file__),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=subprocess_creationflags(),
@@ -358,7 +252,7 @@ def parse_arguments(
 def main() -> None:
     """Run the requested peripheral command for selected devices."""
 
-    config = load_config(__file__)
+    config = config_utils.load(__file__)
     ensure_section(config)
 
     peripherals = peripherals_config(config)
