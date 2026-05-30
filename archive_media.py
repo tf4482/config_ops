@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from winutils_python import config as config_utils
+from winutils_python import config_validation
 from winutils_python import config_sets, connect_smb, visual
 
 CONFIG_SECTION = "archive_media"
@@ -132,7 +133,29 @@ def get_archive_tasks(script_config: dict[str, Any], set_name: str) -> tuple[tup
     """Return configured archive task source and target path pairs."""
 
     tasks = config_utils.required_list(script_config, "tasks", label=config_key(set_name, "tasks"))
+    config_validation.require_list_item_keys(
+        tasks,
+        config_key(set_name, "tasks"),
+        (
+            config_validation.required_key("source"),
+            config_validation.required_key("target"),
+        ),
+    )
     return tuple((Path(str(task["source"])), Path(str(task["target"]))) for task in tasks)
+
+
+def validate_script_config(script_config: dict[str, Any], set_name: str) -> None:
+    """Report missing required configuration for one archive media set."""
+
+    config_validation.require_set_keys(
+        script_config,
+        CONFIG_SECTION,
+        set_name,
+        (
+            config_validation.required_key("extensions"),
+            config_validation.required_key("tasks"),
+        ),
+    )
 
 
 def validate_archive_source(source: Path) -> None:
@@ -214,6 +237,7 @@ def main() -> None:
         empty_message=f"No archive media sets configured in config.yaml. Please add an '{CONFIG_SECTION}' section.",
     )
     script_config = config_sets.get_set_config(config, CONFIG_SECTION, set_name, label="Archive media set")
+    validate_script_config(script_config, set_name)
 
     visual.print_start(f"Starting media archive: {set_name}")
     connect_smb.connect_from_config(
