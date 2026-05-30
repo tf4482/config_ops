@@ -8,6 +8,7 @@ import subprocess
 from typing import Any
 
 from winutils_python import config as config_utils
+from winutils_python import config_validation
 from winutils_python import config_sets, visual
 
 CONFIG_SECTION = "ssh"
@@ -39,6 +40,22 @@ def report_ssh_error(title: str, message: str) -> None:
     """Print a formatted SSH error message."""
 
     visual.print_error(f"{title}: {message}")
+
+
+def validate_ssh_config(ssh_cfg: dict[str, Any], set_name: str) -> None:
+    """Report missing required configuration for one SSH set."""
+
+    config_validation.require_set_keys(
+        ssh_cfg,
+        CONFIG_SECTION,
+        set_name,
+        (
+            config_validation.required_key("user"),
+            config_validation.required_key("host"),
+            config_validation.required_key("port"),
+            config_validation.required_key("command"),
+        ),
+    )
 
 
 def run_ssh_task(
@@ -99,6 +116,7 @@ def main() -> None:
         error_cls=ValueError,
         not_table_message=f"SSH set '{set_name}' was not found in config.yaml",
     )
+    validate_ssh_config(ssh_cfg, set_name)
 
     user = config_utils.required_str(ssh_cfg, "user", label="SSH config value 'user'")
     host = config_utils.required_str(ssh_cfg, "host", label="SSH config value 'host'")
