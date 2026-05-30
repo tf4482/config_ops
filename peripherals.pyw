@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from winutils_python import config as config_utils
+from winutils_python import config_validation
 from winutils_python import visual
 
 
@@ -83,6 +84,32 @@ def registry_path_from_config(peripherals: dict[str, Any]) -> str:
         raise ValueError(f"Configuration value '{config_key(REGISTRY_PATH_KEY)}' must be set")
 
     return registry_path
+
+
+def validate_peripherals_config(peripherals: dict[str, Any]) -> None:
+    """Report missing required peripheral configuration."""
+
+    config_validation.require_keys(
+        peripherals,
+        (config_validation.required_key(REGISTRY_PATH_KEY, label=config_key(REGISTRY_PATH_KEY)),),
+    )
+
+    for name, value in peripherals.items():
+        if name == REGISTRY_PATH_KEY:
+            continue
+
+        if not isinstance(value, dict):
+            visual.print_error("Missing required configuration option(s):")
+            visual.print_error(f"- {config_key(name)} must be a table")
+            raise SystemExit(1)
+
+        config_validation.require_keys(
+            value,
+            (
+                config_validation.required_key("on", label=f"{config_key(name)}.on"),
+                config_validation.required_key("off", label=f"{config_key(name)}.off"),
+            ),
+        )
 
 
 def devices_from_config(peripherals: dict[str, Any]) -> dict[str, PeripheralDevice]:
@@ -256,6 +283,7 @@ def main() -> None:
     ensure_section(config)
 
     peripherals = peripherals_config(config)
+    validate_peripherals_config(peripherals)
     registry_path = registry_path_from_config(peripherals)
     devices = devices_from_config(peripherals)
 
