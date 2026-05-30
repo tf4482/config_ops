@@ -38,7 +38,8 @@ desktop.ini
 ansible.cfg
 auth.json
 auth.json.bak
-config*
+config*.yaml
+config*.yml
 db-sbot-config.debug.json
 db-sbot-config.json
 env.ini
@@ -101,7 +102,6 @@ __pycache__/
 build/
 develop-eggs/
 dist/
-release/
 eggs/
 lib/
 lib64/
@@ -167,3 +167,4 @@ push.bat
 vendor/
 *spec
 deploy.py
+plans/
