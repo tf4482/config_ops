@@ -109,11 +109,14 @@ archive_media:
 adjust_file_creation_date:
   screenshots:
     smb: true
+    mode: file
     source_folder: 'R:\pictures\screenshots'
     target_folder: 'R:\pictures\screenshots adjusted'
     extensions:
       - .jpg
       - .png
+      - .mp4
+      - .mov
     change_files_in_place: false
     overwrite: false
     hour_adjustment: 0
@@ -185,8 +188,12 @@ Behavior:
 - 🧩 Regex patterns must define `year` or `year2`, plus `month` and `day`.
 - ⏱️ Optional groups are `hour`, `minute`, and `second`.
 - 🔁 `hour_adjustment` shifts parsed timestamps.
+- 🧭 `mode: file` parses timestamps from filenames and keeps the previous non-recursive behavior.
+- 🗂️ `mode: folder` recursively processes all matching files below `source_folder` and parses the timestamp from each file's containing folder name.
+- 🧾 `mode: metadata` recursively processes all matching files below `source_folder` and reads embedded media timestamps instead of `patterns`.
+- 📷 Metadata mode supports EXIF timestamps in `.jpg`, `.jpeg`, `.tif`, and `.tiff` files, plus QuickTime/MP4 movie-header timestamps in `.mp4`, `.mov`, `.m4v`, `.3gp`, and `.3g2` files.
 - ✍️ `change_files_in_place: true` updates matching source files directly.
-- 📋 `change_files_in_place: false` copies matching files to `target_folder` or to a `changed_date` folder below the source folder.
+- 📋 `change_files_in_place: false` copies matching files to `target_folder` or to a `changed_date` folder below the source folder. Folder and metadata modes preserve the source subfolder structure below the target folder.
 - 🛡️ `overwrite: false` creates collision-safe suffixed names like `image_1.jpg`.
 - 🧾 Individual file failures are collected while later files continue.
 
