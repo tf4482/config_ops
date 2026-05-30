@@ -109,16 +109,38 @@ archive_media:
 adjust_file_creation_date:
   screenshots:
     smb: true
+    mode: file
     source_folder: 'R:\pictures\screenshots'
     target_folder: 'R:\pictures\screenshots adjusted'
     extensions:
       - .jpg
       - .png
+      - .mp4
+      - .mov
     change_files_in_place: false
     overwrite: false
     hour_adjustment: 0
     patterns:
       - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})'
+
+  media_metadata:
+    smb: true
+    mode: metadata
+    source_folder: 'R:\pictures\import'
+    target_folder: 'R:\pictures\import adjusted'
+    extensions:
+      - .jpg
+      - .jpeg
+      - .tif
+      - .tiff
+      - .mp4
+      - .mov
+      - .m4v
+      - .3gp
+      - .3g2
+    change_files_in_place: false
+    overwrite: false
+    hour_adjustment: 0
 
 ssh:
   manual_backup:
@@ -179,14 +201,37 @@ For each task:
 
 `adjust_file_creation_date.py` runs one named set from `adjust_file_creation_date`.
 
-Behavior:
+Required values:
 
-- 📎 `extensions` and `patterns` must be non-empty lists.
+- 🧭 `mode` selects how timestamps are found.
+- 📂 `source_folder` is the folder to process.
+- 📎 `extensions` is a non-empty list of file extensions to process.
+
+Modes:
+
+- 🧭 `mode: file` parses timestamps from filenames and processes only files directly inside `source_folder`.
+- 🗂️ `mode: folder` recursively processes matching files below `source_folder` and parses the timestamp from each file's containing folder name. Files directly inside a date-named `source_folder` use the `source_folder` name itself.
+- 🧾 `mode: metadata` recursively processes matching files below `source_folder` and reads embedded media timestamps instead of filename/folder regex patterns.
+
+Pattern-based modes:
+
+- 🧩 `mode: file` and `mode: folder` require a non-empty `patterns` list.
 - 🧩 Regex patterns must define `year` or `year2`, plus `month` and `day`.
-- ⏱️ Optional groups are `hour`, `minute`, and `second`.
-- 🔁 `hour_adjustment` shifts parsed timestamps.
+- ⏱️ Optional regex groups are `hour`, `minute`, and `second`.
+
+Metadata mode:
+
+- 📷 Image metadata support: EXIF timestamps from `.jpg`, `.jpeg`, `.tif`, and `.tiff` files.
+- 🎞️ Video metadata support: QuickTime/MP4 movie-header creation timestamps from `.mp4`, `.mov`, `.m4v`, `.3gp`, and `.3g2` files.
+- 🧾 `patterns` is not required for `mode: metadata`.
+- 🔁 `hour_adjustment` is still applied after reading the embedded metadata timestamp.
+
+Output behavior:
+
 - ✍️ `change_files_in_place: true` updates matching source files directly.
 - 📋 `change_files_in_place: false` copies matching files to `target_folder` or to a `changed_date` folder below the source folder.
+- 🗂️ Folder and metadata modes preserve the source subfolder structure below the target folder when copying.
+- 🚫 If the output folder is inside `source_folder`, it is excluded from processing to avoid reprocessing copied output files.
 - 🛡️ `overwrite: false` creates collision-safe suffixed names like `image_1.jpg`.
 - 🧾 Individual file failures are collected while later files continue.
 
@@ -246,6 +291,7 @@ The script no longer uses a separate `release` directory. `dist` is cleaned afte
 The `winutils_python` submodule provides reusable helpers:
 
 - 📝 `config.py` for YAML parsing, dumping, scalar parsing, and table validation.
+- ✅ `config_validation.py` for reusable missing-configuration reporting in root scripts.
 - 🔌 `connect_smb.py` for password obfuscation and SMB `net use` mapping logic.
 - 💾 `file_ops.py` for Robocopy command construction and operation-set execution.
 - 📋 `menu.py` for shared terminal selection menus.
