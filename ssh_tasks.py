@@ -1,101 +1,16 @@
+"""Run named SSH command sets from project config.
+
+The script selects an ``ssh`` set from ``config.yaml``, validates connection and
+command settings, executes ``ssh.exe``, and reports common SSH failures clearly.
+"""
+
 import subprocess
-import sys
-import tkinter as tk
-from pathlib import Path
-from tkinter import messagebox
 from typing import Any
 
-import yaml
+from winutils_python import config as config_utils
+from winutils_python import config_sets, visual
 
-from winutils_python import visual
-
-
-def app_dir(script_file: str | Path) -> Path:
-    """Return the directory that should contain config.yaml.
-
-    In a normal Python run this is the script directory.
-    In a PyInstaller .exe this is the .exe directory, not the temporary
-    extraction directory used by --onefile builds.
-    """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-
-    return Path(script_file).resolve().parent
-
-
-def script_dir(script_file: str | Path) -> Path:
-    # Backwards-compatible name used by the rest of the script.
-    return app_dir(script_file)
-
-
-def config_path(script_file: str | Path) -> Path:
-    return script_dir(script_file) / "config.yaml"
-
-
-def find_config_path(script_file: str | Path) -> Path:
-    path = config_path(script_file)
-
-    if not path.exists():
-        path.write_text("", encoding="utf-8")
-
-    return path
-
-
-def load_config(script_file: str | Path) -> dict[str, Any]:
-    path = find_config_path(script_file)
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-
-    if loaded_config is None:
-        loaded_config = {}
-
-    loaded_config["__config_path__"] = path
-    return loaded_config
-
-
-def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
-    path = config.get("__config_path__")
-    if isinstance(path, Path):
-        existing = path.read_text(encoding="utf-8").rstrip()
-        separator = "\n\n" if existing else ""
-        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
-
-
-def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.setdefault(table, {})
-
-    if not isinstance(table_config, dict):
-        raise TypeError(f"Configuration value '{table}' must be a table")
-
-    table_config[key] = value
-    config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def remove_value(config_path: Path, table: str, key: str) -> None:
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.get(table, {})
-
-    if isinstance(table_config, dict) and key in table_config:
-        del table_config[key]
-        config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def parse_yaml(config_text: str) -> dict[str, Any]:
-    return yaml.safe_load(config_text) or {}
-
-
-def dump_yaml(config: dict[str, Any]) -> str:
-    clean = {k: v for k, v in config.items() if not k.startswith("__")}
-    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
-
-
-def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
-    value = config.get(name, {})
-
-    if not isinstance(value, dict):
-        raise TypeError(f"Configuration value '{name}' must be a table")
-
-    return value
+CONFIG_SECTION = "ssh"
 
 
 DEFAULT_SECTION = r'''ssh:
@@ -107,199 +22,41 @@ DEFAULT_SECTION = r'''ssh:
     command: 'ls'
 '''
 
+def ensure_section(config: dict[str, Any]) -> None:
+    """Ensure the SSH section exists and has table shape."""
 
-def normalize_set_name(set_name: str) -> str:
-    return set_name.lstrip("/-")
-
-
-def choose_ssh_set(config: dict) -> str:
-    ssh_sets = get_table(config, "ssh")
-
-    if not ssh_sets:
-        raise SystemExit("No SSH sets configured in config.yaml. Please add an 'ssh' section.")
-
-    root = tk.Tk()
-    root.title("Choose SSH command")
-    root.geometry("420x320")
-    root.attributes("-topmost", True)
-
-    selected = tk.StringVar(value="")
-    tk.Label(root, text="Choose an SSH command set:").pack(padx=12, pady=(12, 6), anchor="w")
-
-    listbox = tk.Listbox(root)
-    for name in ssh_sets:
-        listbox.insert(tk.END, name)
-    listbox.selection_set(0)
-    listbox.pack(padx=12, pady=6, fill=tk.BOTH, expand=True)
-
-    def accept_selection() -> None:
-        selection = listbox.curselection()
-        if not selection:
-            messagebox.showwarning("No selection", "Select an SSH command set first.", parent=root)
-            return
-
-        selected.set(str(listbox.get(selection[0])))
-        root.destroy()
-
-    def cancel_selection() -> None:
-        root.destroy()
-
-    button_frame = tk.Frame(root)
-    button_frame.pack(padx=12, pady=(6, 12), fill=tk.X)
-    tk.Button(button_frame, text="Run", command=accept_selection).pack(side=tk.RIGHT, padx=(6, 0))
-    tk.Button(button_frame, text="Cancel", command=cancel_selection).pack(side=tk.RIGHT)
-
-    listbox.bind("<Double-Button-1>", lambda _event: accept_selection())
-    root.mainloop()
-
-    if not selected.get():
-        raise SystemExit("No SSH command set selected")
-
-    return selected.get()
-
-
-def choose_ssh_set_terminal(config: dict) -> str:
-    ssh_sets = get_table(config, "ssh")
-
-    if not ssh_sets:
-        raise SystemExit("No SSH sets configured in config.yaml. Please add an 'ssh' section.")
-
-    names = list(ssh_sets.keys())
-    visual.print_list_header("Available SSH sets:")
-    for index, name in enumerate(names, start=1):
-        visual.print_list_item(index, name)
-
-    while True:
-        choice = input("Select SSH set by number or name (or 'exit' to cancel): ").strip()
-
-        if not choice or choice.lower() in {"exit", "quit", "cancel"}:
-            raise SystemExit(0)
-
-        normalized = normalize_set_name(choice)
-        if normalized in ssh_sets:
-            return normalized
-
-        if choice.isdigit():
-            number = int(choice)
-            if 1 <= number <= len(names):
-                return names[number - 1]
-
-        visual.print_warning("Invalid selection. Try again.")
-
-
-def validate_ssh_set_name(config: dict, set_name: str) -> str:
-    if set_name.lower() in {"exit", "quit", "cancel"}:
-        raise SystemExit(0)
-
-    ssh_sets = get_table(config, "ssh")
-
-    if set_name not in ssh_sets:
-        available_sets = ", ".join(ssh_sets) or "none"
-        raise SystemExit(f"Unknown SSH set '{set_name}'. Available sets: {available_sets}")
-
-    return set_name
-
-
-def ssh_set_name(config: dict) -> str:
-    if len(sys.argv) > 1:
-        return validate_ssh_set_name(config, normalize_set_name(sys.argv[1]))
-
-    if visual.is_terminal():
-        return choose_ssh_set_terminal(config)
-
-    return choose_ssh_set(config)
-
-
-def get_ssh_set(config: dict, set_name: str) -> dict:
-    if set_name.lower() in {"exit", "quit", "cancel"}:
-        raise SystemExit(0)
-
-    ssh_sets = get_table(config, "ssh")
-    ssh_cfg = ssh_sets.get(set_name)
-
-    if not isinstance(ssh_cfg, dict):
-        raise ValueError(f"SSH set '{set_name}' was not found in config.yaml")
-
-    return ssh_cfg
-
-
-def required_str(config: dict, key: str) -> str:
-    value = config.get(key)
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"SSH config value '{key}' must be a non-empty string")
-
-    return value
-
-
-def required_port(config: dict) -> int:
-    value = config.get("port")
-    port: int
-
-    if isinstance(value, int):
-        port = value
-    elif isinstance(value, str) and value.isdigit():
-        port = int(value)
-    else:
-        raise ValueError("SSH config value 'port' must be an integer")
-
-    if not 1 <= port <= 65535:
-        raise ValueError("SSH config value 'port' must be in range 1..65535")
-
-    return port
-
-
-def optional_timeout(config: dict) -> float | None:
-    value = config.get("timeout")
-
-    if value is None:
-        return None
-
-    if isinstance(value, int | float):
-        timeout = float(value)
-    elif isinstance(value, str):
-        try:
-            timeout = float(value)
-        except ValueError as error:
-            raise ValueError("SSH config value 'timeout' must be a positive number") from error
-    else:
-        raise ValueError("SSH config value 'timeout' must be a positive number")
-
-    if timeout <= 0:
-        raise ValueError("SSH config value 'timeout' must be greater than 0")
-
-    return timeout
-
-
-def ensure_section(config: dict) -> None:
-    if "ssh" not in config:
-        append_section_yaml(config, DEFAULT_SECTION)
-        visual.print_warning("Added default 'ssh' section to config.yaml. Please configure it before running.")
+    if CONFIG_SECTION not in config:
+        config_utils.append_section_yaml(config, DEFAULT_SECTION)
+        visual.print_warning(
+            f"Added default '{CONFIG_SECTION}' section to config.yaml. Please configure it before running."
+        )
         raise SystemExit(1)
+
+    config_sets.section_sets(config, CONFIG_SECTION)
 
 
 def report_ssh_error(title: str, message: str) -> None:
+    """Print a formatted SSH error message."""
+
     visual.print_error(f"{title}: {message}")
 
-    if visual.is_terminal():
-        return
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
+def run_ssh_task(
+    set_name: str,
+    user: str,
+    host: str,
+    port: int,
+    command: str,
+    timeout: float | None,
+) -> None:
+    """Run one SSH command and translate common failures into clear messages."""
 
-    try:
-        messagebox.showerror(title, message, parent=root)
-    finally:
-        root.destroy()
-
-
-def run_ssh_task(set_name: str, user: str, host: str, port: int, command: str, timeout: float | None) -> None:
     try:
         subprocess.run(
             ["ssh", f"{user}@{host}", "-p", str(port), command],
             check=True,
             timeout=timeout,
-            capture_output=not visual.is_terminal(),
+            capture_output=True,
             text=True,
         )
     except FileNotFoundError as error:
@@ -320,16 +77,40 @@ def run_ssh_task(set_name: str, user: str, host: str, port: int, command: str, t
 
 
 def main() -> None:
-    cfg = load_config(__file__)
-    ensure_section(cfg)
-    set_name = ssh_set_name(cfg)
-    ssh_cfg = get_ssh_set(cfg, set_name)
+    """Run the selected SSH task set."""
 
-    user = required_str(ssh_cfg, "user")
-    host = required_str(ssh_cfg, "host")
-    port = required_port(ssh_cfg)
-    timeout = optional_timeout(ssh_cfg)
-    command = required_str(ssh_cfg, "command")
+    cfg = config_utils.load(__file__)
+    ensure_section(cfg)
+    set_name = config_sets.selected_set_name(
+        cfg,
+        CONFIG_SECTION,
+        label="SSH set",
+        header="Available SSH sets:",
+        empty_message=f"No SSH sets configured in config.yaml. Please add an '{CONFIG_SECTION}' section.",
+        prompt="Select SSH set by number or name (or 'exit' to cancel): ",
+        allow_cancel=True,
+    )
+    ssh_cfg = config_sets.get_set_config(
+        cfg,
+        CONFIG_SECTION,
+        set_name,
+        label="SSH set",
+        allow_cancel=True,
+        error_cls=ValueError,
+        not_table_message=f"SSH set '{set_name}' was not found in config.yaml",
+    )
+
+    user = config_utils.required_str(ssh_cfg, "user", label="SSH config value 'user'")
+    host = config_utils.required_str(ssh_cfg, "host", label="SSH config value 'host'")
+    port = config_utils.required_int_in_range(
+        ssh_cfg,
+        "port",
+        label="SSH config value 'port'",
+        minimum=1,
+        maximum=65535,
+    )
+    timeout = config_utils.optional_positive_float(ssh_cfg, "timeout", label="SSH config value 'timeout'")
+    command = config_utils.required_str(ssh_cfg, "command", label="SSH config value 'command'")
 
     visual.print_start(f"Starting SSH task: {set_name}")
     run_ssh_task(set_name, user, host, port, command, timeout)
