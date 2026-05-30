@@ -103,13 +103,15 @@ def validate_peripherals_config(peripherals: dict[str, Any]) -> None:
             visual.print_error(f"- {config_key(name)} must be a table")
             raise SystemExit(1)
 
-        config_validation.require_keys(
-            value,
-            (
-                config_validation.required_key("on", label=f"{config_key(name)}.on"),
-                config_validation.required_key("off", label=f"{config_key(name)}.off"),
-            ),
-        )
+        missing_keys: list[str] = []
+        if not str(value.get("on", value.get(True, ""))).strip():
+            missing_keys.append(f"{config_key(name)}.on")
+        if not str(value.get("off", value.get(False, ""))).strip():
+            missing_keys.append(f"{config_key(name)}.off")
+
+        config_validation.report_missing_keys(missing_keys)
+        if missing_keys:
+            raise SystemExit(1)
 
 
 def devices_from_config(peripherals: dict[str, Any]) -> dict[str, PeripheralDevice]:
