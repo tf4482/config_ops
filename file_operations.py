@@ -7,6 +7,7 @@ and delegates mirror/copy/move execution to ``winutils_python.file_ops``.
 from typing import Any
 
 from winutils_python import config as config_utils
+from winutils_python import config_validation
 from winutils_python import config_sets, connect_smb, file_ops, visual
 
 CONFIG_SECTION = "file_operations"
@@ -52,6 +53,35 @@ def ensure_section(config: dict[str, Any]) -> None:
     config_sets.section_sets(config, CONFIG_SECTION)
 
 
+def operation_group_tasks(operation_group: Any) -> list[Any]:
+    """Return configured tasks from a file-operation group without executing it."""
+
+    if isinstance(operation_group, list):
+        return operation_group
+
+    if isinstance(operation_group, dict):
+        tasks = operation_group.get("tasks", [])
+        return tasks if isinstance(tasks, list) else []
+
+    return []
+
+
+def validate_operation_set(operation_set: dict[str, Any], set_name: str) -> None:
+    """Report missing required source/target values in configured operations."""
+
+    for operation_type in file_ops.OPERATION_TYPES:
+        operation_group = operation_set.get(operation_type, [])
+        tasks = operation_group_tasks(operation_group)
+        config_validation.require_list_item_keys(
+            tasks,
+            config_sets.config_key(CONFIG_SECTION, set_name, operation_type),
+            (
+                config_validation.required_key("source"),
+                config_validation.required_key("target"),
+            ),
+        )
+
+
 def main() -> None:
     """Run the selected file operation set."""
 
@@ -67,6 +97,7 @@ def main() -> None:
 
     visual.print_start(f"Starting file operations: {set_name}")
     operation_set = operation_set_config(config, set_name)
+    validate_operation_set(operation_set, set_name)
     connect_smb.connect_from_config(
         connect_smb.scoped_config_for_optional_smb(
             config,
