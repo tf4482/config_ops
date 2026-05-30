@@ -8,10 +8,10 @@ The project is intentionally script-oriented: each root script owns its own `con
 
 - 💾 `file_operations.py` runs named Robocopy operation sets for mirror, copy, and move jobs.
 - 🖼️ `archive_media.py` moves configured media files into dated `YYYY/MM/DD` archive folders.
-- 🕒 `adjust_file_creation_date.py` parses timestamps from filenames and applies them as Windows file times.
+- 🕒 `adjust_file_creation_date.py` applies Windows file times from filename, folder-name, or embedded media metadata timestamps.
 - 🔌 `connect_smb.pyw` connects configured SMB network shares without opening a terminal window.
 - 🚀 `ssh_tasks.py` runs named SSH command sets.
-- 💡 `peripherals.py` toggles simple URL-controlled peripherals and stores state in the Windows registry.
+- 💡 `peripherals.pyw` toggles simple URL-controlled peripherals and stores state in the Windows registry.
 - 📦 `deploy.py` compiles root `.py` and `.pyw` scripts with PyInstaller and deploys executables from `dist`.
 - 🧩 `winutils_python/` contains reusable helper modules for config handling, SMB, Robocopy, menus, and terminal visuals.
 
@@ -39,6 +39,8 @@ This is an application-style `uv` project. The local `winutils_python` submodule
 ## 🧭 Configuration model
 
 All root scripts read `config.yaml` next to the script or compiled executable. When a section is missing, the script appends a default example section and exits so the file can be configured first.
+
+Before running task work, root scripts validate required options with `winutils_python/config_validation.py` and print the exact missing config keys, such as `adjust_file_creation_date.test.mode` or `smb.mappings[1].share`.
 
 Named-set tools accept a set name as the first argument. If no argument is provided, they use the shared terminal menu from `winutils_python/menu.py`.
 
@@ -161,6 +163,8 @@ peripherals:
 
 Top-level `smb` defines credentials and mappings. Scripts that support SMB opt in per selected set with `smb: true`.
 
+Top-level SMB config requires `smb.user` and `smb.mappings`; every mapping requires `drive` and `share`.
+
 Per set, `smb` can be:
 
 - 🚫 `false` or omitted to skip SMB connections
@@ -182,6 +186,8 @@ Supported operation groups:
 
 Each operation group can be either a list of tasks or a table with `tasks`, `overwrite`, and `options`.
 
+Each configured operation task must define `source` and `target`; missing task values are reported before Robocopy starts.
+
 Robocopy exit codes below `8` are treated as successful outcomes. Exit codes `8` and above are collected, summarized, and raised after all configured operations have run.
 
 ## 🖼️ Media archive
@@ -192,6 +198,7 @@ For each task:
 
 - 📂 `source` must exist and must be a directory.
 - 🎯 `target` is created as needed.
+- ✅ `source` and `target` are required and reported before archive work starts when missing.
 - 🔎 Matching files are moved recursively.
 - 📅 File creation time determines the destination folder.
 - ♻️ Existing destination files or folders with the same name are removed before moving.
@@ -252,17 +259,19 @@ Optional value:
 
 The port must be in the range `1..65535`. Timeout must be a positive number when configured. Missing `ssh.exe`, timeouts, and non-zero SSH exit codes are reported clearly.
 
+Missing required SSH values are reported before `ssh.exe` is started.
+
 ## 💡 Peripherals
 
-`peripherals.py` controls configured devices by calling their `on` and `off` URLs with `curl.exe`.
+`peripherals.pyw` controls configured devices by calling their `on` and `off` URLs with `curl.exe`.
 
 Usage examples:
 
 ```powershell
-uv run python peripherals.py
-uv run python peripherals.py led on
-uv run python peripherals.py tv toggle
-uv run python peripherals.py suspend
+uv run python peripherals.pyw
+uv run python peripherals.pyw led on
+uv run python peripherals.pyw tv toggle
+uv run python peripherals.pyw suspend
 ```
 
 Supported commands:
@@ -274,6 +283,8 @@ Supported commands:
 - ⏯️ `resume`
 
 If no device is selected, the command is applied to all configured devices. If no command is selected, `toggle` is used. Device state is stored under `peripherals.registry_path` in `HKEY_CURRENT_USER`.
+
+Each configured peripheral device must define `on` and `off` URLs. Missing device URLs and missing `peripherals.registry_path` are reported before URL triggers run.
 
 ## 📦 Deployment
 
@@ -297,8 +308,8 @@ The `winutils_python` submodule provides reusable helpers:
 - 📋 `menu.py` for shared terminal selection menus.
 - 🎨 `visual.py` for terminal-aware status output.
 
-Root scripts still own project-specific `config.yaml` loading, default-section creation, and persistence decisions.
+Root scripts still own project-specific `config.yaml` loading, default-section creation, and persistence decisions. Shared validation helpers only report missing or empty required options; scripts still perform their own type and value validation where needed.
 
 ## 🚧 Status
 
-The project is usable for Windows automation workflows but remains script-first and configuration-format changes are still possible.
+The project is usable for Windows automation workflows but remains script-first and configuration-format changes are still possible. Current root scripts fail early with exact missing configuration keys before starting destructive or external operations.
