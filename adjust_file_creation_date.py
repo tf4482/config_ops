@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from winutils_python import config as config_utils
+from winutils_python import config_validation
 from winutils_python import config_sets, connect_smb, visual
 
 
@@ -146,7 +147,7 @@ def source_folder_from_config(script_config: dict[str, Any]) -> Path:
 def mode_from_config(script_config: dict[str, Any], set_name: str) -> str:
     """Return the configured timestamp source mode."""
 
-    mode = str(script_config.get("mode", MODE_FILE)).strip().lower()
+    mode = str(script_config["mode"]).strip().lower()
 
     if mode not in VALID_MODES:
         valid_modes = ", ".join(sorted(VALID_MODES))
@@ -247,6 +248,30 @@ def get_patterns_for_mode(script_config: dict[str, Any], set_name: str, mode: st
     return get_patterns(script_config, set_name)
 
 
+def validate_script_config(script_config: dict[str, Any], set_name: str) -> None:
+    """Report missing required configuration for one adjustment set."""
+
+    config_validation.require_set_keys(
+        script_config,
+        CONFIG_SECTION,
+        set_name,
+        (
+            config_validation.required_key("mode"),
+            config_validation.required_key("source_folder"),
+            config_validation.required_key("extensions"),
+        ),
+    )
+
+    mode = mode_from_config(script_config, set_name)
+    if mode != MODE_METADATA:
+        config_validation.require_set_keys(
+            script_config,
+            CONFIG_SECTION,
+            set_name,
+            (config_validation.required_key("patterns"),),
+        )
+
+
 def datetime_to_filetime(timestamp: datetime) -> tuple[int, int]:
     """Convert a Python datetime into low/high Windows FILETIME integers."""
 
@@ -334,6 +359,15 @@ def parse_folder_timestamp(folder: Path, patterns: list[re.Pattern[str]], hour_a
     """Parse a timestamp from a folder name using the first matching pattern."""
 
     return parse_timestamp_text(folder.name, patterns, hour_adjustment)
+
+
+def folder_timestamp_source(source_file: Path, source_folder: Path) -> Path:
+    """Return the folder name that should provide a file's timestamp."""
+
+    if source_file.parent == source_folder:
+        return source_folder
+
+    return source_file.parent
 
 
 def metadata_timestamp(path: Path, hour_adjustment: int) -> datetime | None:
@@ -677,11 +711,23 @@ def is_relative_to(path: Path, root: Path) -> bool:
     return True
 
 
-def matching_files(source_folder: Path, extensions: set[str], *, recursive: bool) -> tuple[Path, ...]:
+def matching_files(
+    source_folder: Path,
+    extensions: set[str],
+    *,
+    recursive: bool,
+    excluded_folder: Path | None = None,
+) -> tuple[Path, ...]:
     """Return matching source files, optionally including all subfolders."""
 
     paths = source_folder.rglob("*") if recursive else source_folder.iterdir()
-    return tuple(path for path in paths if path.is_file() and path.suffix.lower() in extensions)
+    return tuple(
+        path
+        for path in paths
+        if path.is_file()
+        and path.suffix.lower() in extensions
+        and (excluded_folder is None or not is_relative_to(path, excluded_folder))
+    )
 
 
 def adjust_one_file(
@@ -719,12 +765,13 @@ def adjust_files_from_filenames(
     extensions: set[str],
     patterns: list[re.Pattern[str]],
     hour_adjustment: int,
+    excluded_folder: Path | None,
 ) -> list[FileAdjustmentResult]:
     """Adjust matching files using timestamps parsed from each filename."""
 
     results: list[FileAdjustmentResult] = []
 
-    for source_file in matching_files(source_folder, extensions, recursive=False):
+    for source_file in matching_files(source_folder, extensions, recursive=False, excluded_folder=excluded_folder):
         try:
             timestamp = parse_timestamp(source_file, patterns, hour_adjustment)
             if timestamp is None:
@@ -755,18 +802,23 @@ def adjust_files_from_folder_names(
     extensions: set[str],
     patterns: list[re.Pattern[str]],
     hour_adjustment: int,
+    excluded_folder: Path | None,
 ) -> list[FileAdjustmentResult]:
     """Adjust matching files recursively using timestamps parsed from containing folder names."""
 
     results: list[FileAdjustmentResult] = []
-    source_files = matching_files(source_folder, extensions, recursive=True)
+    source_files = matching_files(source_folder, extensions, recursive=True, excluded_folder=excluded_folder)
 
     for source_file in source_files:
         if not change_files_in_place and is_relative_to(source_file, target_folder):
             continue
 
         try:
-            timestamp = parse_folder_timestamp(source_file.parent, patterns, hour_adjustment)
+            timestamp = parse_folder_timestamp(
+                folder_timestamp_source(source_file, source_folder),
+                patterns,
+                hour_adjustment,
+            )
             if timestamp is None:
                 continue
 
@@ -795,11 +847,12 @@ def adjust_files_from_metadata(
     overwrite: bool,
     extensions: set[str],
     hour_adjustment: int,
+    excluded_folder: Path | None,
 ) -> list[FileAdjustmentResult]:
     """Adjust matching files recursively using embedded image or video metadata timestamps."""
 
     results: list[FileAdjustmentResult] = []
-    source_files = matching_files(source_folder, extensions, recursive=True)
+    source_files = matching_files(source_folder, extensions, recursive=True, excluded_folder=excluded_folder)
 
     for source_file in source_files:
         if not change_files_in_place and is_relative_to(source_file, target_folder):
@@ -838,6 +891,9 @@ def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileA
     extensions = get_file_extensions(script_config, set_name)
     patterns = get_patterns_for_mode(script_config, set_name, mode)
     hour_adjustment = hour_adjustment_from_config(script_config)
+    excluded_folder = None
+    if not change_files_in_place and is_relative_to(target_folder, source_folder):
+        excluded_folder = target_folder
 
     prepare_target_folder(change_files_in_place, target_folder)
 
@@ -852,6 +908,7 @@ def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileA
             extensions=extensions,
             patterns=patterns,
             hour_adjustment=hour_adjustment,
+            excluded_folder=excluded_folder,
         )
 
     if mode == MODE_METADATA:
@@ -862,6 +919,7 @@ def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileA
             overwrite=overwrite,
             extensions=extensions,
             hour_adjustment=hour_adjustment,
+            excluded_folder=excluded_folder,
         )
 
     return adjust_files_from_filenames(
@@ -872,6 +930,7 @@ def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileA
         extensions=extensions,
         patterns=patterns,
         hour_adjustment=hour_adjustment,
+        excluded_folder=excluded_folder,
     )
 
 
@@ -912,6 +971,7 @@ def main() -> None:
         set_name,
         label="File creation date adjustment set",
     )
+    validate_script_config(script_config, set_name)
 
     visual.print_start(f"Starting file creation date adjustment: {set_name}")
     connect_smb.connect_from_config(
