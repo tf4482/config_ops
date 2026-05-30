@@ -5,6 +5,7 @@ description = "Configuration-driven Windows automation scripts for SMB, Robocopy
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "exif>=1.6.1",
     "winutils-python",
 ]
 keywords = [

@@ -219,6 +219,7 @@ Modes:
 - 🧭 `mode: file` parses timestamps from filenames and processes only files directly inside `source_folder`.
 - 🗂️ `mode: folder` recursively processes matching files below `source_folder` and parses the timestamp from each file's containing folder name. Files directly inside a date-named `source_folder` use the `source_folder` name itself.
 - 🧾 `mode: metadata` recursively processes matching files below `source_folder` and reads embedded media timestamps instead of filename/folder regex patterns.
+- 🔁 `mode: metadata_reverse` recursively processes matching files below `source_folder` and writes embedded media timestamps from each file's Windows creation date.
 
 Pattern-based modes:
 
@@ -226,12 +227,15 @@ Pattern-based modes:
 - 🧩 Regex patterns must define `year` or `year2`, plus `month` and `day`.
 - ⏱️ Optional regex groups are `hour`, `minute`, and `second`.
 
-Metadata mode:
+Metadata modes:
 
 - 📷 Image metadata support: EXIF timestamps from `.jpg`, `.jpeg`, `.tif`, and `.tiff` files.
 - 🎞️ Video metadata support: QuickTime/MP4 movie-header creation timestamps from `.mp4`, `.mov`, `.m4v`, `.3gp`, and `.3g2` files.
-- 🧾 `patterns` is not required for `mode: metadata`.
-- 🔁 `hour_adjustment` is still applied after reading the embedded metadata timestamp.
+- 🧾 `patterns` is not required for `mode: metadata` or `mode: metadata_reverse`.
+- 🔁 `mode: metadata` applies `hour_adjustment` after reading the embedded metadata timestamp.
+- 📝 `mode: metadata_reverse` uses the `exif` Python package to write image date-taken fields and updates QuickTime-family video creation atoms directly.
+- 🛡️ `mode: metadata_reverse` restores filesystem creation/access/modification timestamps after writing embedded metadata.
+- 🔁 `mode: metadata_reverse` applies `hour_adjustment` to the file creation date before writing embedded metadata.
 
 Output behavior:
 
