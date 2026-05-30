@@ -1,8 +1,9 @@
-"""Adjust Windows file timestamps from date/time values parsed from filenames.
+"""Adjust Windows file timestamps from filenames, folders, or media metadata.
 
 The script reads named configuration sets from ``config.yaml``, optionally connects
 SMB mappings, copies files when requested, and applies parsed timestamps as
 creation, access, and modification times through the Win32 ``SetFileTime`` API.
+It can also write media metadata from a file's existing Windows creation time.
 """
 
 import re
@@ -49,10 +50,13 @@ CONFIG_SECTION = "adjust_file_creation_date"
 MODE_FILE = "file"
 MODE_FOLDER = "folder"
 MODE_METADATA = "metadata"
-VALID_MODES = {MODE_FILE, MODE_FOLDER, MODE_METADATA}
+MODE_METADATA_REVERSE = "metadata_reverse"
+VALID_MODES = {MODE_FILE, MODE_FOLDER, MODE_METADATA, MODE_METADATA_REVERSE}
+PATTERN_MODES = {MODE_FILE, MODE_FOLDER}
 DEFAULT_SMB_REGISTRY_PATH = "Software\\peripherals"
 CANCEL_CHOICES = {"exit", "quit", "cancel"}
-GENERIC_READ_ATTRIBUTES = 0x0100
+FILE_READ_ATTRIBUTES = 0x0080
+FILE_WRITE_ATTRIBUTES = 0x0100
 FILE_SHARE_READ_WRITE_DELETE = 0x00000001 | 0x00000002 | 0x00000004
 OPEN_EXISTING = 3
 FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
@@ -61,6 +65,8 @@ QUICKTIME_VIDEO_EXTENSIONS = {".3g2", ".3gp", ".m4v", ".mov", ".mp4"}
 EXIF_DATETIME_TAGS = (0x9003, 0x9004, 0x0132)
 METADATA_DATETIME_FORMATS = ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S")
 QUICKTIME_EPOCH = datetime(1904, 1, 1, tzinfo=timezone.utc)
+QUICKTIME_CONTAINER_ATOMS = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"udta", b"meta", b"ilst"}
+QUICKTIME_CREATION_TIME_ATOMS = {b"mvhd", b"tkhd", b"mdhd"}
 
 kernel32 = WinDLL("kernel32", use_last_error=True)
 kernel32.CreateFileW.argtypes = (
@@ -73,6 +79,8 @@ kernel32.CreateFileW.argtypes = (
     c_void_p,
 )
 kernel32.CreateFileW.restype = c_void_p
+kernel32.GetFileTime.argtypes = (c_void_p, c_void_p, c_void_p, c_void_p)
+kernel32.GetFileTime.restype = c_bool
 kernel32.SetFileTime.argtypes = (c_void_p, c_void_p, c_void_p, c_void_p)
 kernel32.SetFileTime.restype = c_bool
 kernel32.CloseHandle.argtypes = (c_void_p,)
@@ -147,7 +155,7 @@ def source_folder_from_config(script_config: dict[str, Any]) -> Path:
 def mode_from_config(script_config: dict[str, Any], set_name: str) -> str:
     """Return the configured timestamp source mode."""
 
-    mode = str(script_config["mode"]).strip().lower()
+    mode = str(script_config["mode"]).strip().lower().replace("-", "_").replace(" ", "_")
 
     if mode not in VALID_MODES:
         valid_modes = ", ".join(sorted(VALID_MODES))
@@ -240,9 +248,9 @@ def get_patterns(script_config: dict[str, Any], set_name: str) -> list[re.Patter
 
 
 def get_patterns_for_mode(script_config: dict[str, Any], set_name: str, mode: str) -> list[re.Pattern[str]]:
-    """Return regex patterns unless the selected mode reads embedded metadata."""
+    """Return regex patterns only for modes that parse filename/folder text."""
 
-    if mode == MODE_METADATA:
+    if mode not in PATTERN_MODES:
         return []
 
     return get_patterns(script_config, set_name)
@@ -263,7 +271,7 @@ def validate_script_config(script_config: dict[str, Any], set_name: str) -> None
     )
 
     mode = mode_from_config(script_config, set_name)
-    if mode != MODE_METADATA:
+    if mode in PATTERN_MODES:
         config_validation.require_set_keys(
             script_config,
             CONFIG_SECTION,
@@ -280,20 +288,25 @@ def datetime_to_filetime(timestamp: datetime) -> tuple[int, int]:
     return ticks & 0xFFFFFFFF, ticks >> 32
 
 
+def filetime_to_datetime(filetime: "FileTime") -> datetime:
+    """Convert a Win32 FILETIME structure into a local Python datetime."""
+
+    ticks = filetime.dwLowDateTime + (filetime.dwHighDateTime << 32)
+    return (WINDOWS_EPOCH + timedelta(seconds=ticks / WINDOWS_TICK)).astimezone()
+
+
 class FileTime(Structure):
     """ctypes representation of the Win32 FILETIME structure."""
 
     _fields_ = (("dwLowDateTime", c_uint32), ("dwHighDateTime", c_uint32))
 
 
-def set_file_times(path: Path, timestamp: datetime) -> None:
-    """Set creation, access, and modification times for a Windows file."""
+def open_file_time_handle(path: Path, access: int) -> c_void_p:
+    """Open a Windows file handle suitable for reading or writing timestamps."""
 
-    low_date_time, high_date_time = datetime_to_filetime(timestamp)
-    filetime = FileTime(low_date_time, high_date_time)
     handle = kernel32.CreateFileW(
         str(path),
-        GENERIC_READ_ATTRIBUTES,
+        access,
         FILE_SHARE_READ_WRITE_DELETE,
         None,
         OPEN_EXISTING,
@@ -302,14 +315,64 @@ def set_file_times(path: Path, timestamp: datetime) -> None:
     )
 
     if handle == INVALID_HANDLE_VALUE:
-        raise OSError(f"Could not open file for timestamp update: {path}")
+        raise OSError(f"Could not open file for timestamp access: {path}")
+
+    return handle
+
+
+def get_file_times(path: Path) -> tuple[FileTime, FileTime, FileTime]:
+    """Return raw creation, access, and modification FILETIME values."""
+
+    handle = open_file_time_handle(path, FILE_READ_ATTRIBUTES)
+    creation_time = FileTime()
+    access_time = FileTime()
+    modification_time = FileTime()
 
     try:
-        success = kernel32.SetFileTime(handle, byref(filetime), byref(filetime), byref(filetime))
+        success = kernel32.GetFileTime(handle, byref(creation_time), byref(access_time), byref(modification_time))
+        if not success:
+            raise OSError(f"Could not read timestamps: {path}")
+    finally:
+        kernel32.CloseHandle(handle)
+
+    return (
+        FileTime(creation_time.dwLowDateTime, creation_time.dwHighDateTime),
+        FileTime(access_time.dwLowDateTime, access_time.dwHighDateTime),
+        FileTime(modification_time.dwLowDateTime, modification_time.dwHighDateTime),
+    )
+
+
+def set_raw_file_times(path: Path, creation_time: FileTime, access_time: FileTime, modification_time: FileTime) -> None:
+    """Set raw creation, access, and modification FILETIME values."""
+
+    handle = open_file_time_handle(path, FILE_WRITE_ATTRIBUTES)
+
+    try:
+        success = kernel32.SetFileTime(handle, byref(creation_time), byref(access_time), byref(modification_time))
         if not success:
             raise OSError(f"Could not set timestamps: {path}")
     finally:
         kernel32.CloseHandle(handle)
+
+
+def set_file_times(path: Path, timestamp: datetime) -> None:
+    """Set creation, access, and modification times for a Windows file."""
+
+    low_date_time, high_date_time = datetime_to_filetime(timestamp)
+    filetime = FileTime(low_date_time, high_date_time)
+    set_raw_file_times(path, filetime, filetime, filetime)
+
+
+def file_creation_timestamp(path: Path, hour_adjustment: int) -> datetime:
+    """Return a file's Windows creation time as a local datetime."""
+
+    creation_time, _, _ = get_file_times(path)
+    timestamp = filetime_to_datetime(creation_time)
+
+    if hour_adjustment:
+        timestamp += timedelta(hours=hour_adjustment)
+
+    return timestamp
 
 
 def parse_timestamp_text(value: str, patterns: list[re.Pattern[str]], hour_adjustment: int) -> datetime | None:
@@ -550,6 +613,42 @@ def parse_metadata_datetime(value: str | None) -> datetime | None:
     return None
 
 
+def metadata_datetime_text(timestamp: datetime) -> str:
+    """Return EXIF-compatible local date/time text."""
+
+    return timestamp.astimezone().strftime("%Y:%m:%d %H:%M:%S")
+
+
+def write_image_metadata_timestamp(path: Path, timestamp: datetime) -> None:
+    """Write common EXIF date-taken tags using the Python exif package."""
+
+    try:
+        from exif import Image
+    except ImportError as error:
+        raise RuntimeError("Missing dependency 'exif'. Run 'uv sync' before using metadata_reverse mode.") from error
+
+    timestamp_text = metadata_datetime_text(timestamp)
+
+    with path.open("rb") as file:
+        image = Image(file)
+
+    image.datetime = timestamp_text
+    image.datetime_original = timestamp_text
+    image.datetime_digitized = timestamp_text
+
+    path.write_bytes(image.get_file())
+
+
+def quicktime_seconds(timestamp: datetime) -> int:
+    """Return QuickTime epoch seconds for a local or aware datetime."""
+
+    seconds = int((timestamp.astimezone(timezone.utc) - QUICKTIME_EPOCH).total_seconds())
+    if seconds < 0:
+        raise ValueError(f"Timestamp predates the QuickTime epoch: {timestamp:%Y-%m-%d %H:%M:%S}")
+
+    return seconds
+
+
 def quicktime_timestamp(path: Path) -> datetime | None:
     """Read a QuickTime/MP4 creation timestamp from movie header metadata."""
 
@@ -579,7 +678,7 @@ def quicktime_timestamp_from_range(file: Any, start: int, end: int) -> datetime 
             timestamp = quicktime_mvhd_timestamp(file, payload_start, atom_end)
             if timestamp is not None:
                 return timestamp
-        elif atom_type in {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"udta", b"meta", b"ilst"}:
+        elif atom_type in QUICKTIME_CONTAINER_ATOMS:
             child_start = payload_start + (4 if atom_type == b"meta" else 0)
             timestamp = quicktime_timestamp_from_range(file, child_start, atom_end)
             if timestamp is not None:
@@ -645,6 +744,90 @@ def quicktime_mvhd_timestamp(file: Any, start: int, end: int) -> datetime | None
         return None
 
     return (QUICKTIME_EPOCH + timedelta(seconds=seconds)).astimezone()
+
+
+def write_quicktime_metadata_timestamp(path: Path, timestamp: datetime) -> None:
+    """Write QuickTime-family media creation timestamps in place."""
+
+    seconds = quicktime_seconds(timestamp)
+    with path.open("r+b") as file:
+        changed = write_quicktime_timestamp_in_range(file, 0, path.stat().st_size, seconds)
+
+    if not changed:
+        raise ValueError(f"No writable QuickTime creation metadata found: {path}")
+
+
+def write_quicktime_timestamp_in_range(file: Any, start: int, end: int, seconds: int) -> bool:
+    """Write creation timestamps in supported QuickTime atoms inside a byte range."""
+
+    changed = False
+    offset = start
+
+    while offset + 8 <= end:
+        atom_size, atom_type, header_size = read_quicktime_atom_header(file, offset, end)
+        if atom_size is None or atom_type is None or header_size is None:
+            break
+
+        atom_end = offset + atom_size
+        payload_start = offset + header_size
+
+        if atom_end > end or atom_size < header_size:
+            break
+
+        if atom_type in QUICKTIME_CREATION_TIME_ATOMS:
+            changed = write_quicktime_atom_creation_time(file, payload_start, atom_end, seconds) or changed
+        elif atom_type in QUICKTIME_CONTAINER_ATOMS:
+            child_start = payload_start + (4 if atom_type == b"meta" else 0)
+            changed = write_quicktime_timestamp_in_range(file, child_start, atom_end, seconds) or changed
+
+        offset = atom_end
+
+    return changed
+
+
+def write_quicktime_atom_creation_time(file: Any, start: int, end: int, seconds: int) -> bool:
+    """Write one QuickTime atom's creation-time field."""
+
+    file.seek(start)
+    version_data = file.read(1)
+    if len(version_data) != 1:
+        return False
+
+    version = version_data[0]
+    creation_time_offset = start + 4
+
+    if version == 1:
+        if creation_time_offset + 8 > end:
+            return False
+        file.seek(creation_time_offset)
+        file.write(struct.pack(">Q", seconds))
+        return True
+
+    if creation_time_offset + 4 > end:
+        return False
+
+    if seconds > 0xFFFFFFFF:
+        raise ValueError("QuickTime version 0 metadata cannot store timestamps after 2040-02-06")
+
+    file.seek(creation_time_offset)
+    file.write(struct.pack(">I", seconds))
+    return True
+
+
+def write_metadata_timestamp(path: Path, timestamp: datetime) -> bool:
+    """Write supported image/video metadata timestamp fields."""
+
+    suffix = path.suffix.lower()
+
+    if suffix in EXIF_IMAGE_EXTENSIONS:
+        write_image_metadata_timestamp(path, timestamp)
+        return True
+
+    if suffix in QUICKTIME_VIDEO_EXTENSIONS:
+        write_quicktime_metadata_timestamp(path, timestamp)
+        return True
+
+    return False
 
 
 def prepare_target_folder(change_files_in_place: bool, target_folder: Path) -> None:
@@ -880,6 +1063,79 @@ def adjust_files_from_metadata(
     return results
 
 
+def adjust_one_metadata_reverse_file(
+    source_file: Path,
+    *,
+    change_files_in_place: bool,
+    target_folder: Path,
+    overwrite: bool,
+    hour_adjustment: int,
+    relative_root: Path,
+) -> FileAdjustmentResult | None:
+    """Copy when needed, then write embedded metadata from the file creation time."""
+
+    timestamp = file_creation_timestamp(source_file, hour_adjustment)
+    destination = prepare_destination(
+        source_file,
+        change_files_in_place=change_files_in_place,
+        target_folder=target_folder,
+        overwrite=overwrite,
+        relative_root=relative_root,
+    )
+    if destination is None:
+        return None
+
+    original_times = get_file_times(destination)
+    try:
+        metadata_written = write_metadata_timestamp(destination, timestamp)
+    finally:
+        # Metadata writes often touch modification time; restore filesystem timestamps.
+        set_raw_file_times(destination, *original_times)
+
+    if not metadata_written:
+        return None
+
+    visual.print_success(f"Updated metadata {destination.name} → {timestamp:%Y-%m-%d %H:%M:%S}")
+    return FileAdjustmentResult(source_file, destination, timestamp, changed=True)
+
+
+def adjust_files_from_creation_dates_to_metadata(
+    source_folder: Path,
+    *,
+    change_files_in_place: bool,
+    target_folder: Path,
+    overwrite: bool,
+    extensions: set[str],
+    hour_adjustment: int,
+    excluded_folder: Path | None,
+) -> list[FileAdjustmentResult]:
+    """Write media metadata timestamps from each file's Windows creation date."""
+
+    results: list[FileAdjustmentResult] = []
+    source_files = matching_files(source_folder, extensions, recursive=True, excluded_folder=excluded_folder)
+
+    for source_file in source_files:
+        if not change_files_in_place and is_relative_to(source_file, target_folder):
+            continue
+
+        try:
+            result = adjust_one_metadata_reverse_file(
+                source_file,
+                change_files_in_place=change_files_in_place,
+                target_folder=target_folder,
+                overwrite=overwrite,
+                hour_adjustment=hour_adjustment,
+                relative_root=source_folder,
+            )
+            if result is not None:
+                results.append(result)
+        except Exception as error:
+            visual.print_error(f"Reverse metadata adjustment failed: {source_file}: {error}")
+            results.append(FileAdjustmentResult(source_file, error=error))
+
+    return results
+
+
 def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileAdjustmentResult]:
     """Process all matching files for one adjustment set and collect results."""
 
@@ -913,6 +1169,17 @@ def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileA
 
     if mode == MODE_METADATA:
         return adjust_files_from_metadata(
+            source_folder,
+            change_files_in_place=change_files_in_place,
+            target_folder=target_folder,
+            overwrite=overwrite,
+            extensions=extensions,
+            hour_adjustment=hour_adjustment,
+            excluded_folder=excluded_folder,
+        )
+
+    if mode == MODE_METADATA_REVERSE:
+        return adjust_files_from_creation_dates_to_metadata(
             source_folder,
             change_files_in_place=change_files_in_place,
             target_folder=target_folder,
