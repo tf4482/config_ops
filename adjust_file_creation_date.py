@@ -1,130 +1,63 @@
+"""Adjust Windows file timestamps from date/time values parsed from filenames.
+
+The script reads named configuration sets from ``config.yaml``, optionally connects
+SMB mappings, copies files when requested, and applies parsed timestamps as
+creation, access, and modification times through the Win32 ``SetFileTime`` API.
+"""
+
 import re
 import shutil
-import sys
 from ctypes import Structure, WinDLL, byref, c_bool, c_uint32, c_void_p, c_wchar_p
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from winutils_python import connect_smb, visual
-
-
-def app_dir(script_file: str | Path) -> Path:
-    """Return the directory that should contain config.yaml.
-
-    In a normal Python run this is the script directory.
-    In a PyInstaller .exe this is the .exe directory, not the temporary
-    extraction directory used by --onefile builds.
-    """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-
-    return Path(script_file).resolve().parent
-
-
-def script_dir(script_file: str | Path) -> Path:
-    # Backwards-compatible name used by the rest of the script.
-    return app_dir(script_file)
-
-
-def config_path(script_file: str | Path) -> Path:
-    return script_dir(script_file) / "config.yaml"
-
-
-def find_config_path(script_file: str | Path) -> Path:
-    path = config_path(script_file)
-
-    if not path.exists():
-        path.write_text("", encoding="utf-8")
-
-    return path
-
-
-def parse_yaml(config_text: str) -> dict[str, Any]:
-    return yaml.safe_load(config_text) or {}
-
-
-def dump_yaml(config: dict[str, Any]) -> str:
-    clean = {key: value for key, value in config.items() if not key.startswith("__")}
-    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
-
-
-def load_config(script_file: str | Path) -> dict[str, Any]:
-    path = find_config_path(script_file)
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-
-    if loaded_config is None:
-        loaded_config = {}
-
-    loaded_config["__config_path__"] = path
-    return loaded_config
-
-
-def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
-    path = config.get("__config_path__")
-    if isinstance(path, Path):
-        existing = path.read_text(encoding="utf-8").rstrip()
-        separator = "\n\n" if existing else ""
-        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
-
-
-def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.setdefault(table, {})
-
-    if not isinstance(table_config, dict):
-        raise TypeError(f"Configuration value '{table}' must be a table")
-
-    table_config[key] = value
-    config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def remove_value(config_path: Path, table: str, key: str) -> None:
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.get(table, {})
-
-    if isinstance(table_config, dict) and key in table_config:
-        del table_config[key]
-        config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
-    value = config.get(name, {})
-
-    if not isinstance(value, dict):
-        raise TypeError(f"Configuration value '{name}' must be a table")
-
-    return value
+from winutils_python import config as config_utils
+from winutils_python import config_sets, connect_smb, visual
 
 
 DEFAULT_SECTION = r'''adjust_file_creation_date:
-  smb: false
-  source_folder: 'R:\path\to\files'
-  target_folder: 'C:\path\to\target'
-  extensions:
-    - .jpg
-    - .jpeg
-    - .png
-    - .gif
-    - .bmp
-    - .tif
-    - .tiff
-  change_files_in_place: true
-  overwrite: false
-  hour_adjustment: 0
-  patterns:
-    - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:[ _-]+(?P<hour>\d{2})_(?P<minute>\d{2})_(?P<second>\d{2}))?'
+  example_set:
+    smb: false
+    source_folder: 'R:\path\to\files'
+    target_folder: 'C:\path\to\target'
+    extensions:
+      - .jpg
+      - .jpeg
+      - .png
+      - .gif
+      - .bmp
+      - .tif
+      - .tiff
+    change_files_in_place: true
+    overwrite: false
+    hour_adjustment: 0
+    patterns:
+      - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:[ _-]+(?P<hour>\d{2})_(?P<minute>\d{2})_(?P<second>\d{2}))?'
 '''
 
 INVALID_HANDLE_VALUE = c_void_p(-1).value
 WINDOWS_TICK = 10_000_000
 WINDOWS_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
+CONFIG_SECTION = "adjust_file_creation_date"
+DEFAULT_SMB_REGISTRY_PATH = "Software\\peripherals"
+CANCEL_CHOICES = {"exit", "quit", "cancel"}
+GENERIC_READ_ATTRIBUTES = 0x0100
+FILE_SHARE_READ_WRITE_DELETE = 0x00000001 | 0x00000002 | 0x00000004
+OPEN_EXISTING = 3
+FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 
 kernel32 = WinDLL("kernel32", use_last_error=True)
-kernel32.CreateFileW.argtypes = (c_wchar_p, c_uint32, c_uint32, c_void_p, c_uint32, c_uint32, c_void_p)
+kernel32.CreateFileW.argtypes = (
+    c_wchar_p,
+    c_uint32,
+    c_uint32,
+    c_void_p,
+    c_uint32,
+    c_uint32,
+    c_void_p,
+)
 kernel32.CreateFileW.restype = c_void_p
 kernel32.SetFileTime.argtypes = (c_void_p, c_void_p, c_void_p, c_void_p)
 kernel32.SetFileTime.restype = c_bool
@@ -134,6 +67,8 @@ kernel32.CloseHandle.restype = c_bool
 
 @dataclass(frozen=True)
 class FileAdjustmentResult:
+    """Result for a single source file processed by the adjustment workflow."""
+
     source: Path
     destination: Path | None = None
     timestamp: datetime | None = None
@@ -142,49 +77,168 @@ class FileAdjustmentResult:
 
     @property
     def failed(self) -> bool:
+        """Return whether this file failed during processing."""
+
         return self.error is not None
 
 
 class FileCreationDateAdjustmentError(RuntimeError):
+    """Raised after processing when one or more file adjustments failed."""
+
     def __init__(self, results: list[FileAdjustmentResult]) -> None:
+        """Build a summary error from failed adjustment results."""
+
         self.results = results
         failed_results = [result for result in results if result.failed]
         summary = ", ".join(f"{result.source}: {result.error}" for result in failed_results)
         super().__init__(f"{len(failed_results)} file creation date adjustment(s) failed: {summary}")
 
+def ensure_section(config: dict[str, Any]) -> None:
+    """Ensure the adjustment section exists and has table shape."""
 
-def store_prompted_smb_password(config: dict, password: str) -> None:
-    config_path = config.get("__config_path__")
-    if config_path is None:
-        raise ValueError("Loaded configuration is missing internal '__config_path__'")
+    if CONFIG_SECTION not in config:
+        config_utils.append_section_yaml(config, DEFAULT_SECTION)
+        visual.print_warning(
+            f"Added default '{CONFIG_SECTION}' section to config.yaml. "
+            "Please configure it before running."
+        )
+        raise SystemExit(1)
 
-    replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
-    remove_value(config_path, "smb", "password_file")
-    remove_value(config_path, "smb", "password")
+    config_sets.section_sets(config, CONFIG_SECTION)
 
 
-class FileTime(Structure):
-    _fields_ = (
-        ("dwLowDateTime", c_uint32),
-        ("dwHighDateTime", c_uint32),
+def config_key(set_name: str, name: str) -> str:
+    """Return a human-readable dotted config key for error messages."""
+
+    return config_sets.config_key(CONFIG_SECTION, set_name, name)
+
+
+def registry_path_from_config(script_config: dict[str, Any], set_name: str) -> str:
+    """Return the registry path used by related SMB/peripheral integrations."""
+
+    registry_path = str(script_config.get("smb_registry_path", DEFAULT_SMB_REGISTRY_PATH)).strip()
+
+    if not registry_path:
+        raise ValueError(f"Configuration value '{config_key(set_name, 'smb_registry_path')}' must be set")
+
+    return registry_path
+
+
+def source_folder_from_config(script_config: dict[str, Any]) -> Path:
+    """Return the source folder configured for the adjustment set."""
+
+    return Path(str(script_config["source_folder"]))
+
+
+def change_files_in_place_from_config(script_config: dict[str, Any]) -> bool:
+    """Return whether matching files should be modified in place."""
+
+    return bool(script_config.get("change_files_in_place", True))
+
+
+def overwrite_from_config(script_config: dict[str, Any]) -> bool:
+    """Return whether copied target files may be overwritten."""
+
+    return bool(script_config.get("overwrite", False))
+
+
+def target_folder_from_config(
+    script_config: dict[str, Any],
+    source_folder: Path,
+    change_files_in_place: bool,
+) -> Path:
+    """Return the destination folder for copied files."""
+
+    if change_files_in_place:
+        return source_folder
+
+    target_folder = script_config.get("target_folder")
+
+    if target_folder:
+        return Path(str(target_folder))
+
+    return source_folder / "changed_date"
+
+
+def hour_adjustment_from_config(script_config: dict[str, Any]) -> int:
+    """Return the configured hour offset applied to parsed timestamps."""
+
+    return int(script_config.get("hour_adjustment", 0))
+
+
+def get_file_extensions(script_config: dict[str, Any], set_name: str) -> set[str]:
+    """Return normalized lowercase file extensions to process."""
+
+    return config_utils.normalized_extension_set(
+        script_config,
+        "extensions",
+        label=config_key(set_name, "extensions"),
+        non_empty=True,
     )
 
 
-def datetime_to_filetime(timestamp: datetime) -> FileTime:
+def get_patterns(script_config: dict[str, Any], set_name: str) -> list[re.Pattern[str]]:
+    """Compile and validate configured filename timestamp regex patterns."""
+
+    pattern_configs = config_utils.required_list(
+        script_config,
+        "patterns",
+        label=config_key(set_name, "patterns"),
+        non_empty=True,
+    )
+
+    compiled_patterns: list[re.Pattern] = []
+    for index, pattern_config in enumerate(pattern_configs, start=1):
+        if not isinstance(pattern_config, dict):
+            raise TypeError(f"Pattern entry {index} must be a table with a 'pattern' value")
+
+        pattern_value = pattern_config.get("pattern")
+        if not isinstance(pattern_value, str) or not pattern_value:
+            raise ValueError(f"Pattern entry {index} must define a non-empty 'pattern' string")
+
+        try:
+            compiled_pattern = re.compile(pattern_value, flags=re.IGNORECASE)
+        except re.error as error:
+            raise ValueError(f"Pattern entry {index} has invalid regex syntax: {error}") from error
+
+        group_names = set(compiled_pattern.groupindex)
+        has_year_group = "year" in group_names or "year2" in group_names
+        has_month_day_groups = {"month", "day"}.issubset(group_names)
+
+        if not has_year_group or not has_month_day_groups:
+            raise ValueError(f"Pattern entry {index} must define named groups year or year2, plus month and day")
+
+        compiled_patterns.append(compiled_pattern)
+
+    return compiled_patterns
+
+
+def datetime_to_filetime(timestamp: datetime) -> tuple[int, int]:
+    """Convert a Python datetime into low/high Windows FILETIME integers."""
+
     utc_timestamp = timestamp.astimezone(timezone.utc)
     ticks = int((utc_timestamp - WINDOWS_EPOCH).total_seconds() * WINDOWS_TICK)
-    return FileTime(ticks & 0xFFFFFFFF, ticks >> 32)
+    return ticks & 0xFFFFFFFF, ticks >> 32
+
+
+class FileTime(Structure):
+    """ctypes representation of the Win32 FILETIME structure."""
+
+    _fields_ = (("dwLowDateTime", c_uint32), ("dwHighDateTime", c_uint32))
 
 
 def set_file_times(path: Path, timestamp: datetime) -> None:
-    filetime = datetime_to_filetime(timestamp)
+    """Set creation, access, and modification times for a Windows file."""
+
+    low_date_time, high_date_time = datetime_to_filetime(timestamp)
+    filetime = FileTime(low_date_time, high_date_time)
     handle = kernel32.CreateFileW(
         str(path),
-        0x0100,
-        0x00000001 | 0x00000002 | 0x00000004,
+        GENERIC_READ_ATTRIBUTES,
+        FILE_SHARE_READ_WRITE_DELETE,
         None,
-        3,
-        0x02000000,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
         None,
     )
 
@@ -199,7 +253,9 @@ def set_file_times(path: Path, timestamp: datetime) -> None:
         kernel32.CloseHandle(handle)
 
 
-def parse_timestamp(path: Path, patterns: list[re.Pattern], hour_adjustment: int) -> datetime | None:
+def parse_timestamp(path: Path, patterns: list[re.Pattern[str]], hour_adjustment: int) -> datetime | None:
+    """Parse a timestamp from a filename using the first matching pattern."""
+
     file_name_no_ext = path.stem
 
     for pattern in patterns:
@@ -237,6 +293,8 @@ def parse_timestamp(path: Path, patterns: list[re.Pattern], hour_adjustment: int
 
 
 def prepare_target_folder(change_files_in_place: bool, target_folder: Path) -> None:
+    """Create the target folder when files are copied before modification."""
+
     if change_files_in_place:
         return
 
@@ -244,6 +302,8 @@ def prepare_target_folder(change_files_in_place: bool, target_folder: Path) -> N
 
 
 def collision_safe_path(path: Path) -> Path:
+    """Return a non-existing path by appending a numeric suffix when needed."""
+
     if not path.exists():
         return path
 
@@ -262,6 +322,8 @@ def prepare_destination(
     target_folder: Path,
     overwrite: bool,
 ) -> Path | None:
+    """Return the file to update, copying it first when not modifying in place."""
+
     if change_files_in_place:
         return source_file
 
@@ -278,74 +340,16 @@ def prepare_destination(
     return destination
 
 
-def get_file_extensions(script_config: dict) -> set[str]:
-    extensions = script_config.get("extensions", [])
+def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileAdjustmentResult]:
+    """Process all matching files for one adjustment set and collect results."""
 
-    if not isinstance(extensions, list):
-        raise TypeError("Configuration value 'adjust_file_creation_date.extensions' must be a list")
-
-    normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
-
-    if not normalized_extensions:
-        raise ValueError("Configuration value 'adjust_file_creation_date.extensions' must define at least one extension")
-
-    return normalized_extensions
-
-
-def get_patterns(script_config: dict) -> list[re.Pattern]:
-    pattern_configs = script_config.get("patterns", [])
-
-    if not isinstance(pattern_configs, list):
-        raise TypeError("Configuration value 'adjust_file_creation_date.patterns' must be a list")
-
-    if not pattern_configs:
-        raise ValueError("Configuration value 'adjust_file_creation_date.patterns' must define at least one pattern")
-
-    compiled_patterns: list[re.Pattern] = []
-    for index, pattern_config in enumerate(pattern_configs, start=1):
-        if not isinstance(pattern_config, dict):
-            raise TypeError(f"Pattern entry {index} must be a table with a 'pattern' value")
-
-        pattern_value = pattern_config.get("pattern")
-        if not isinstance(pattern_value, str) or not pattern_value:
-            raise ValueError(f"Pattern entry {index} must define a non-empty 'pattern' string")
-
-        try:
-            compiled_pattern = re.compile(pattern_value, flags=re.IGNORECASE)
-        except re.error as error:
-            raise ValueError(f"Pattern entry {index} has invalid regex syntax: {error}") from error
-
-        group_names = set(compiled_pattern.groupindex)
-        if not ({"year", "year2"} & group_names) or not {"month", "day"}.issubset(group_names):
-            raise ValueError(
-                f"Pattern entry {index} must define named groups year or year2, plus month and day"
-            )
-
-        compiled_patterns.append(compiled_pattern)
-
-    return compiled_patterns
-
-
-def get_target_folder(script_config: dict, source_folder: Path, change_files_in_place: bool) -> Path:
-    if change_files_in_place:
-        return source_folder
-
-    target_folder = script_config.get("target_folder")
-
-    if target_folder:
-        return Path(str(target_folder))
-
-    return source_folder / "changed_date"
-
-
-def adjust_file_creation_dates(script_config: dict) -> list[FileAdjustmentResult]:
-    source_folder = Path(str(script_config["source_folder"]))
-    change_files_in_place = bool(script_config.get("change_files_in_place", True))
-    overwrite = bool(script_config.get("overwrite", False))
-    target_folder = get_target_folder(script_config, source_folder, change_files_in_place)
-    extensions = get_file_extensions(script_config)
-    patterns = get_patterns(script_config)
-    hour_adjustment = int(script_config.get("hour_adjustment", 0))
+    source_folder = source_folder_from_config(script_config)
+    change_files_in_place = change_files_in_place_from_config(script_config)
+    overwrite = overwrite_from_config(script_config)
+    target_folder = target_folder_from_config(script_config, source_folder, change_files_in_place)
+    extensions = get_file_extensions(script_config, set_name)
+    patterns = get_patterns(script_config, set_name)
+    hour_adjustment = hour_adjustment_from_config(script_config)
 
     results: list[FileAdjustmentResult] = []
     prepare_target_folder(change_files_in_place, target_folder)
@@ -353,10 +357,7 @@ def adjust_file_creation_dates(script_config: dict) -> list[FileAdjustmentResult
     visual.print_info(f"Adjusting file creation dates in {source_folder}", emoji="archive")
 
     for source_file in source_folder.iterdir():
-        if not source_file.is_file():
-            continue
-
-        if source_file.suffix.lower() not in extensions:
+        if not source_file.is_file() or source_file.suffix.lower() not in extensions:
             continue
 
         try:
@@ -384,12 +385,14 @@ def adjust_file_creation_dates(script_config: dict) -> list[FileAdjustmentResult
 
 
 def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
+    """Print a compact summary of successful and failed file adjustments."""
+
     failed_results = [result for result in results if result.failed]
     changed_count = sum(1 for result in results if result.changed)
 
     visual.print_info(
-        f"File creation date adjustment summary: {changed_count} updated, "
-        f"{len(failed_results)} failed, {len(results)} matched file(s)",
+        "File creation date adjustment summary: "
+        f"{changed_count} updated, {len(failed_results)} failed, {len(results)} matched file(s)",
         emoji="list",
     )
 
@@ -397,48 +400,46 @@ def summarize_adjustment_results(results: list[FileAdjustmentResult]) -> None:
         visual.print_error(f"Failed timestamp update: {result.source}: {result.error}")
 
 
-def ensure_section(config: dict) -> dict:
-    if "adjust_file_creation_date" not in config:
-        append_section_yaml(config, DEFAULT_SECTION)
-        visual.print_warning("Added default 'adjust_file_creation_date' section to config.yaml. Please configure it before running.")
-        raise SystemExit(1)
-
-    return get_table(config, "adjust_file_creation_date")
-
-
-def config_for_adjust_smb(config: dict, script_config: dict) -> dict:
-    adjust_smb = script_config.get("smb", False)
-
-    if not isinstance(adjust_smb, bool):
-        raise TypeError("Configuration value 'adjust_file_creation_date.smb' must be true or false")
-
-    scoped_config = dict(config)
-
-    if adjust_smb:
-        return scoped_config
-
-    scoped_config.pop("smb", None)
-    return scoped_config
-
-
 def main() -> None:
-    config = load_config(__file__)
-    script_config = ensure_section(config)
+    """Run the selected file creation date adjustment set."""
 
-    visual.print_start("Starting file creation date adjustment")
-    connect_smb.connect_from_config(
-        config_for_adjust_smb(config, script_config),
-        on_password_prompted=lambda password: store_prompted_smb_password(config, password),
+    config = config_utils.load(__file__)
+    ensure_section(config)
+    set_name = config_sets.selected_set_name(
+        config,
+        CONFIG_SECTION,
+        label="file creation date adjustment set",
+        header="Available file creation date adjustment sets:",
+        empty_message=(
+            "No file creation date adjustment sets configured in config.yaml. "
+            f"Please add an '{CONFIG_SECTION}' section."
+        ),
+    )
+    script_config = config_sets.get_set_config(
+        config,
+        CONFIG_SECTION,
+        set_name,
+        label="File creation date adjustment set",
     )
 
-    results = adjust_file_creation_dates(script_config)
+    visual.print_start(f"Starting file creation date adjustment: {set_name}")
+    connect_smb.connect_from_config(
+        connect_smb.scoped_config_for_optional_smb(
+            config,
+            script_config,
+            error_label=f"Configuration value '{config_key(set_name, 'smb')}'",
+        ),
+        on_password_prompted=lambda password: connect_smb.store_prompted_password(config, password),
+    )
+
+    results = adjust_file_creation_dates(script_config, set_name)
     summarize_adjustment_results(results)
 
     if any(result.failed for result in results):
         raise FileCreationDateAdjustmentError(results)
 
     changed_count = sum(1 for result in results if result.changed)
-    visual.print_done(f"File creation date adjustment finished: {changed_count} file(s) updated")
+    visual.print_done(f"File creation date adjustment finished: {set_name}: {changed_count} file(s) updated")
 
 
 if __name__ == "__main__":

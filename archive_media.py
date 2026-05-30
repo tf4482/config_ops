@@ -1,118 +1,45 @@
+"""Archive configured media files into date-based folders.
+
+The script reads a named ``archive_media`` configuration set, optionally connects
+SMB mappings, and moves files with configured extensions into ``YYYY/MM/DD``
+folders based on filesystem creation time.
+"""
+
 import shutil
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
+from winutils_python import config as config_utils
+from winutils_python import config_sets, connect_smb, visual
 
-from winutils_python import connect_smb, visual
+CONFIG_SECTION = "archive_media"
 
 DEFAULT_SECTION = r'''archive_media:
-  smb: false
-  extensions:
-    - .jpg
-    - .jpeg
-    - .png
-    - .gif
-    - .bmp
-  tasks:
-    - source: 'R:\path\to\source'
-      target: 'R:\path\to\target'
+  example_set:
+    smb: false
+    extensions:
+      - .jpg
+      - .jpeg
+      - .png
+      - .gif
+      - .bmp
+    tasks:
+      - source: 'R:\path\to\source'
+        target: 'R:\path\to\target'
 '''
 
+def config_key(set_name: str, name: str) -> str:
+    """Return a dotted config key for human-readable error messages."""
 
-def app_dir(script_file: str | Path) -> Path:
-    """Return the directory that should contain config.yaml.
-
-    In a normal Python run this is the script directory.
-    In a PyInstaller .exe this is the .exe directory, not the temporary
-    extraction directory used by --onefile builds.
-    """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-
-    return Path(script_file).resolve().parent
-
-
-def script_dir(script_file: str | Path) -> Path:
-    # Backwards-compatible name used by the rest of the script.
-    return app_dir(script_file)
-
-
-def config_path(script_file: str | Path) -> Path:
-    return script_dir(script_file) / "config.yaml"
-
-
-def find_config_path(script_file: str | Path) -> Path:
-    path = config_path(script_file)
-
-    if not path.exists():
-        path.write_text("", encoding="utf-8")
-
-    return path
-
-
-def load_config(script_file: str | Path) -> dict[str, Any]:
-    path = find_config_path(script_file)
-    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
-
-    if loaded_config is None:
-        loaded_config = {}
-
-    loaded_config["__config_path__"] = path
-    return loaded_config
-
-
-def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
-    path = config.get("__config_path__")
-    if isinstance(path, Path):
-        existing = path.read_text(encoding="utf-8").rstrip()
-        separator = "\n\n" if existing else ""
-        path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
-
-
-def replace_or_add_string_value(config_path: Path, table: str, key: str, value: str) -> None:
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.setdefault(table, {})
-
-    if not isinstance(table_config, dict):
-        raise TypeError(f"Configuration value '{table}' must be a table")
-
-    table_config[key] = value
-    config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def remove_value(config_path: Path, table: str, key: str) -> None:
-    loaded_config = parse_yaml(config_path.read_text(encoding="utf-8")) or {}
-    table_config = loaded_config.get(table, {})
-
-    if isinstance(table_config, dict) and key in table_config:
-        del table_config[key]
-        config_path.write_text(dump_yaml(loaded_config), encoding="utf-8")
-
-
-def parse_yaml(config_text: str) -> dict[str, Any]:
-    return yaml.safe_load(config_text) or {}
-
-
-def dump_yaml(config: dict[str, Any]) -> str:
-    clean = {k: v for k, v in config.items() if not k.startswith("__")}
-    return yaml.safe_dump(clean, sort_keys=False, allow_unicode=True)
-
-
-def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
-    value = config.get(name, {})
-
-    if not isinstance(value, dict):
-        raise TypeError(f"Configuration value '{name}' must be a table")
-
-    return value
+    return config_sets.config_key(CONFIG_SECTION, set_name, name)
 
 
 @dataclass(frozen=True)
 class ArchiveTaskResult:
+    """Result for one configured media archive task."""
+
     source: Path
     target: Path
     moved_count: int = 0
@@ -120,11 +47,17 @@ class ArchiveTaskResult:
 
     @property
     def failed(self) -> bool:
+        """Return whether this archive task failed."""
+
         return self.error is not None
 
 
 class ArchiveMediaError(RuntimeError):
+    """Raised after processing when one or more archive tasks failed."""
+
     def __init__(self, results: list[ArchiveTaskResult]) -> None:
+        """Build a summary error from failed archive task results."""
+
         self.results = results
         failed_results = [result for result in results if result.failed]
         summary = ", ".join(
@@ -134,17 +67,9 @@ class ArchiveMediaError(RuntimeError):
         super().__init__(f"{len(failed_results)} archive media task(s) failed: {summary}")
 
 
-def store_prompted_smb_password(config: dict, password: str) -> None:
-    config_path = config.get("__config_path__")
-    if config_path is None:
-        raise ValueError("Loaded configuration is missing internal '__config_path__'")
-
-    replace_or_add_string_value(config_path, "smb", "encrypted_password", connect_smb.encrypt_password(password))
-    remove_value(config_path, "smb", "password_file")
-    remove_value(config_path, "smb", "password")
-
-
 def get_creation_time(path: Path) -> datetime:
+    """Return the filesystem creation time for a path as local datetime."""
+
     stat_result = path.stat()
 
     if hasattr(stat_result, "st_birthtime"):
@@ -156,6 +81,8 @@ def get_creation_time(path: Path) -> datetime:
 
 
 def remove_destination_if_exists(destination: Path) -> None:
+    """Delete an existing destination file, symlink, or directory."""
+
     if not destination.exists() and not destination.is_symlink():
         return
 
@@ -166,11 +93,11 @@ def remove_destination_if_exists(destination: Path) -> None:
 
 
 def move_media_to_dated_archive(source: Path, target: Path, extensions: set[str]) -> int:
+    """Move matching media files from one source into dated archive folders."""
+
     validate_archive_source(source)
 
     moved_count = 0
-    if visual.is_terminal():
-        print(flush=True)
 
     visual.print_info(f"Archiving media: {source} → {target}", emoji="archive")
 
@@ -182,12 +109,7 @@ def move_media_to_dated_archive(source: Path, target: Path, extensions: set[str]
             continue
 
         creation_date = get_creation_time(current_path)
-        target_year_month_day = (
-            target
-            / creation_date.strftime("%Y")
-            / creation_date.strftime("%m")
-            / creation_date.strftime("%d")
-        )
+        target_year_month_day = dated_archive_folder(target, creation_date)
         target_year_month_day.mkdir(parents=True, exist_ok=True)
 
         destination = target_year_month_day / current_path.name
@@ -200,14 +122,22 @@ def move_media_to_dated_archive(source: Path, target: Path, extensions: set[str]
     return moved_count
 
 
-def get_archive_tasks(script_config: dict) -> tuple[tuple[Path, Path], ...]:
-    return tuple(
-        (Path(str(task["source"])), Path(str(task["target"])))
-        for task in script_config.get("tasks", [])
-    )
+def dated_archive_folder(target: Path, creation_date: datetime) -> Path:
+    """Return the ``YYYY/MM/DD`` archive folder for a creation date."""
+
+    return target / creation_date.strftime("%Y") / creation_date.strftime("%m") / creation_date.strftime("%d")
+
+
+def get_archive_tasks(script_config: dict[str, Any], set_name: str) -> tuple[tuple[Path, Path], ...]:
+    """Return configured archive task source and target path pairs."""
+
+    tasks = config_utils.required_list(script_config, "tasks", label=config_key(set_name, "tasks"))
+    return tuple((Path(str(task["source"])), Path(str(task["target"]))) for task in tasks)
 
 
 def validate_archive_source(source: Path) -> None:
+    """Ensure an archive source exists and is a directory."""
+
     if not source.exists():
         raise FileNotFoundError(f"Archive source does not exist: {source}")
 
@@ -215,45 +145,32 @@ def validate_archive_source(source: Path) -> None:
         raise NotADirectoryError(f"Archive source is not a directory: {source}")
 
 
-def get_media_extensions(script_config: dict) -> set[str]:
-    extensions = script_config.get("extensions", [])
+def get_media_extensions(script_config: dict[str, Any], set_name: str) -> set[str]:
+    """Return normalized lowercase media extensions for a set."""
 
-    if not isinstance(extensions, list):
-        raise TypeError("Configuration value 'archive_media.extensions' must be a list")
-
-    normalized_extensions = {str(extension).lower() for extension in extensions if str(extension).strip()}
-
-    if not normalized_extensions:
-        raise ValueError("Configuration value 'archive_media.extensions' must define at least one extension")
-
-    return normalized_extensions
+    return config_utils.normalized_extension_set(
+        script_config,
+        "extensions",
+        label=config_key(set_name, "extensions"),
+    )
 
 
-def ensure_section(config: dict) -> dict:
-    if "archive_media" not in config:
-        append_section_yaml(config, DEFAULT_SECTION)
-        visual.print_warning("Added default 'archive_media' section to config.yaml. Please configure it before running.")
+def ensure_section(config: dict[str, Any]) -> None:
+    """Ensure the archive section exists and has table shape."""
+
+    if CONFIG_SECTION not in config:
+        config_utils.append_section_yaml(config, DEFAULT_SECTION)
+        visual.print_warning(
+            f"Added default '{CONFIG_SECTION}' section to config.yaml. Please configure it before running."
+        )
         raise SystemExit(1)
 
-    return get_table(config, "archive_media")
-
-
-def config_for_archive_smb(config: dict, script_config: dict) -> dict:
-    archive_smb = script_config.get("smb", False)
-
-    if not isinstance(archive_smb, bool):
-        raise TypeError("Configuration value 'archive_media.smb' must be true or false")
-
-    scoped_config = dict(config)
-
-    if archive_smb:
-        return scoped_config
-
-    scoped_config.pop("smb", None)
-    return scoped_config
+    config_sets.section_sets(config, CONFIG_SECTION)
 
 
 def run_archive_tasks(tasks: tuple[tuple[Path, Path], ...], extensions: set[str]) -> list[ArchiveTaskResult]:
+    """Run archive tasks and collect successes and failures."""
+
     results: list[ArchiveTaskResult] = []
 
     for source, target in tasks:
@@ -268,6 +185,8 @@ def run_archive_tasks(tasks: tuple[tuple[Path, Path], ...], extensions: set[str]
 
 
 def summarize_archive_results(results: list[ArchiveTaskResult]) -> None:
+    """Print a compact summary of archive task results."""
+
     failed_results = [result for result in results if result.failed]
     successful_count = len(results) - len(failed_results)
     total_moved = sum(result.moved_count for result in results)
@@ -283,24 +202,38 @@ def summarize_archive_results(results: list[ArchiveTaskResult]) -> None:
 
 
 def main() -> None:
-    config = load_config(__file__)
-    script_config = ensure_section(config)
+    """Run the selected media archive set."""
 
-    visual.print_start("Starting media archive")
+    config = config_utils.load(__file__)
+    ensure_section(config)
+    set_name = config_sets.selected_set_name(
+        config,
+        CONFIG_SECTION,
+        label="archive media set",
+        header="Available archive media sets:",
+        empty_message=f"No archive media sets configured in config.yaml. Please add an '{CONFIG_SECTION}' section.",
+    )
+    script_config = config_sets.get_set_config(config, CONFIG_SECTION, set_name, label="Archive media set")
+
+    visual.print_start(f"Starting media archive: {set_name}")
     connect_smb.connect_from_config(
-        config_for_archive_smb(config, script_config),
-        on_password_prompted=lambda password: store_prompted_smb_password(config, password),
+        connect_smb.scoped_config_for_optional_smb(
+            config,
+            script_config,
+            error_label=f"Configuration value '{config_key(set_name, 'smb')}'",
+        ),
+        on_password_prompted=lambda password: connect_smb.store_prompted_password(config, password),
     )
 
-    extensions = get_media_extensions(script_config)
-    results = run_archive_tasks(get_archive_tasks(script_config), extensions)
+    extensions = get_media_extensions(script_config, set_name)
+    results = run_archive_tasks(get_archive_tasks(script_config, set_name), extensions)
     summarize_archive_results(results)
 
     if any(result.failed for result in results):
         raise ArchiveMediaError(results)
 
     total_moved = sum(result.moved_count for result in results)
-    visual.print_done(f"Media archive finished: {total_moved} file(s) moved")
+    visual.print_done(f"Media archive finished: {set_name}: {total_moved} file(s) moved")
 
 
 if __name__ == "__main__":
