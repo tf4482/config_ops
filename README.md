@@ -219,7 +219,7 @@ Modes:
 - 🧭 `mode: file` parses timestamps from filenames and processes only files directly inside `source_folder`.
 - 🗂️ `mode: folder` recursively processes matching files below `source_folder` and parses the timestamp from each file's containing folder name. Files directly inside a date-named `source_folder` use the `source_folder` name itself.
 - 🧾 `mode: metadata` recursively processes matching files below `source_folder` and reads embedded media timestamps instead of filename/folder regex patterns.
-- 🔁 `mode: metadata_reverse` recursively processes matching files below `source_folder` and writes embedded media timestamps from each file's Windows creation date.
+- 🔁 `mode: metadata_reverse` recursively processes matching files below `source_folder` and writes embedded media timestamps from each file's Windows modification date.
 
 Pattern-based modes:
 
@@ -235,12 +235,13 @@ Metadata modes:
 - 🔁 `mode: metadata` applies `hour_adjustment` after reading the embedded metadata timestamp.
 - 📝 `mode: metadata_reverse` uses the `exif` Python package to write image date-taken fields and updates QuickTime-family video creation atoms directly.
 - 🛡️ `mode: metadata_reverse` restores filesystem creation/access/modification timestamps after writing embedded metadata.
-- 🔁 `mode: metadata_reverse` applies `hour_adjustment` to the file creation date before writing embedded metadata.
+- 🔁 `mode: metadata_reverse` applies `hour_adjustment` to the file modification date before writing embedded metadata.
 
 Output behavior:
 
 - ✍️ `change_files_in_place: true` updates matching source files directly.
 - 📋 `change_files_in_place: false` copies matching files to `target_folder` or to a `changed_date` folder below the source folder.
+- 🕒 Filename, folder, and metadata timestamp adjustments set the Windows creation, access, and modification dates to the resolved timestamp.
 - 🗂️ Folder and metadata modes preserve the source subfolder structure below the target folder when copying.
 - 🚫 If the output folder is inside `source_folder`, it is excluded from processing to avoid reprocessing copied output files.
 - 🛡️ `overwrite: false` creates collision-safe suffixed names like `image_1.jpg`.

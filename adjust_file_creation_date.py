@@ -3,7 +3,7 @@
 The script reads named configuration sets from ``config.yaml``, optionally connects
 SMB mappings, copies files when requested, and applies parsed timestamps as
 creation, access, and modification times through the Win32 ``SetFileTime`` API.
-It can also write media metadata from a file's existing Windows creation time.
+It can also write media metadata from a file's existing Windows modification time.
 """
 
 import re
@@ -16,9 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from winutils_python import config as config_utils
-from winutils_python import config_validation
-from winutils_python import config_sets, connect_smb, visual
-
+from winutils_python import config_sets, config_validation, connect_smb, visual
 
 DEFAULT_SECTION = r'''adjust_file_creation_date:
   example_set:
@@ -355,19 +353,19 @@ def set_raw_file_times(path: Path, creation_time: FileTime, access_time: FileTim
         kernel32.CloseHandle(handle)
 
 
-def set_file_times(path: Path, timestamp: datetime) -> None:
-    """Set creation, access, and modification times for a Windows file."""
+def set_creation_and_modification_times(path: Path, timestamp: datetime) -> None:
+    """Set creation and modification times for a Windows file."""
 
     low_date_time, high_date_time = datetime_to_filetime(timestamp)
     filetime = FileTime(low_date_time, high_date_time)
     set_raw_file_times(path, filetime, filetime, filetime)
 
 
-def file_creation_timestamp(path: Path, hour_adjustment: int) -> datetime:
-    """Return a file's Windows creation time as a local datetime."""
+def file_modification_timestamp(path: Path, hour_adjustment: int) -> datetime:
+    """Return a file's Windows modification time as a local datetime."""
 
-    creation_time, _, _ = get_file_times(path)
-    timestamp = filetime_to_datetime(creation_time)
+    _, _, modification_time = get_file_times(path)
+    timestamp = filetime_to_datetime(modification_time)
 
     if hour_adjustment:
         timestamp += timedelta(hours=hour_adjustment)
@@ -934,7 +932,7 @@ def adjust_one_file(
     if destination is None:
         return None
 
-    set_file_times(destination, timestamp)
+    set_creation_and_modification_times(destination, timestamp)
     visual.print_success(f"Updated {destination.name} → {timestamp:%Y-%m-%d %H:%M:%S}")
     return FileAdjustmentResult(source_file, destination, timestamp, changed=True)
 
@@ -1072,9 +1070,9 @@ def adjust_one_metadata_reverse_file(
     hour_adjustment: int,
     relative_root: Path,
 ) -> FileAdjustmentResult | None:
-    """Copy when needed, then write embedded metadata from the file creation time."""
+    """Copy when needed, then write embedded metadata from the file modification time."""
 
-    timestamp = file_creation_timestamp(source_file, hour_adjustment)
+    timestamp = file_modification_timestamp(source_file, hour_adjustment)
     destination = prepare_destination(
         source_file,
         change_files_in_place=change_files_in_place,
@@ -1099,7 +1097,7 @@ def adjust_one_metadata_reverse_file(
     return FileAdjustmentResult(source_file, destination, timestamp, changed=True)
 
 
-def adjust_files_from_creation_dates_to_metadata(
+def adjust_files_from_modification_dates_to_metadata(
     source_folder: Path,
     *,
     change_files_in_place: bool,
@@ -1109,7 +1107,7 @@ def adjust_files_from_creation_dates_to_metadata(
     hour_adjustment: int,
     excluded_folder: Path | None,
 ) -> list[FileAdjustmentResult]:
-    """Write media metadata timestamps from each file's Windows creation date."""
+    """Write media metadata timestamps from each file's Windows modification date."""
 
     results: list[FileAdjustmentResult] = []
     source_files = matching_files(source_folder, extensions, recursive=True, excluded_folder=excluded_folder)
@@ -1179,7 +1177,7 @@ def adjust_file_creation_dates(script_config: dict, set_name: str) -> list[FileA
         )
 
     if mode == MODE_METADATA_REVERSE:
-        return adjust_files_from_creation_dates_to_metadata(
+        return adjust_files_from_modification_dates_to_metadata(
             source_folder,
             change_files_in_place=change_files_in_place,
             target_folder=target_folder,
