@@ -21,6 +21,8 @@ REGISTRY_PATH_KEY = "registry_path"
 VALID_COMMANDS = {"on", "off", "toggle", "suspend", "resume"}
 DEFAULT_COMMAND = "toggle"
 CREATE_NO_WINDOW = 0x08000000
+CURL_CONNECT_TIMEOUT_SECONDS = 10
+CURL_MAX_TIME_SECONDS = 30
 
 DEFAULT_SECTION = r'''peripherals:
   registry_path: 'Software\peripherals'
@@ -176,29 +178,38 @@ def subprocess_creationflags() -> int:
 
 
 def trigger_url(url: str) -> None:
-    """Trigger a device URL with ``curl.exe`` in the background."""
+    """Trigger a device URL and fail when curl or the HTTP request fails."""
 
-    subprocess.Popen(
-        ["curl.exe", url],
+    subprocess.run(
+        [
+            "curl.exe",
+            "--fail-with-body",
+            "--silent",
+            "--show-error",
+            "--connect-timeout",
+            str(CURL_CONNECT_TIMEOUT_SECONDS),
+            "--max-time",
+            str(CURL_MAX_TIME_SECONDS),
+            url,
+        ],
         cwd=config_utils.script_dir(__file__),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        check=True,
         creationflags=subprocess_creationflags(),
     )
 
 
 def turn_device_on(registry_path: str, device: PeripheralDevice) -> None:
-    """Persist a device as enabled and trigger its on URL."""
+    """Trigger a device on and persist state after success."""
 
-    write_device_state(registry_path, device.name, True)
     trigger_url(device.on_url)
+    write_device_state(registry_path, device.name, True)
 
 
 def turn_device_off(registry_path: str, device: PeripheralDevice) -> None:
-    """Persist a device as disabled and trigger its off URL."""
+    """Trigger a device off and persist state after success."""
 
-    write_device_state(registry_path, device.name, False)
     trigger_url(device.off_url)
+    write_device_state(registry_path, device.name, False)
 
 
 def toggle_device(registry_path: str, device: PeripheralDevice) -> None:
@@ -292,8 +303,16 @@ def main() -> None:
     arguments = [normalize_argument(argument) for argument in sys.argv[1:]]
     selected_devices, command = parse_arguments(arguments, devices)
 
+    failures: list[str] = []
     for device in selected_devices:
-        run_device_command(registry_path, device, command)
+        try:
+            run_device_command(registry_path, device, command)
+        except (OSError, subprocess.SubprocessError, ValueError) as error:
+            visual.print_error(f"Peripheral command failed: {device.name} /{command}: {error}")
+            failures.append(f"{device.name}: {error}")
+
+    if failures:
+        raise RuntimeError(f"{len(failures)} peripheral command(s) failed: {'; '.join(failures)}")
 
     visual.print_done(f"Peripheral command finished: /{command} for {len(selected_devices)} device(s)")
 
