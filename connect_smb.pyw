@@ -17,6 +17,7 @@ CONFIG_SECTION = "smb"
 DEFAULT_SECTION = r'''smb:
   user: 'DOMAIN\user'
   mappings:
+    - share: '\\SERVER\main'
     - drive: 'Q:'
       share: '\\SERVER\backup'
     - drive: 'R:'
@@ -55,10 +56,7 @@ def validate_smb_config(config: dict[str, Any]) -> None:
     config_validation.require_list_item_keys(
         mappings,
         "smb.mappings",
-        (
-            config_validation.required_key("drive"),
-            config_validation.required_key("share"),
-        ),
+        (config_validation.required_key("share"),),
     )
 
 
