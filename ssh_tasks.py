@@ -8,8 +8,7 @@ import subprocess
 from typing import Any
 
 from winutils_python import config as config_utils
-from winutils_python import config_validation
-from winutils_python import config_sets, visual
+from winutils_python import config_sets, config_validation, visual
 
 CONFIG_SECTION = "ssh"
 
@@ -70,11 +69,17 @@ def run_ssh_task(
 
     try:
         subprocess.run(
-            ["ssh", f"{user}@{host}", "-p", str(port), command],
+            [
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-p",
+                str(port),
+                f"{user}@{host}",
+                command,
+            ],
             check=True,
             timeout=timeout,
-            capture_output=True,
-            text=True,
         )
     except FileNotFoundError as error:
         message = "The 'ssh' executable was not found in PATH. Install OpenSSH or add ssh.exe to PATH."
@@ -85,10 +90,7 @@ def run_ssh_task(
         report_ssh_error(f"SSH task timed out: {set_name}", message)
         raise
     except subprocess.CalledProcessError as error:
-        stderr = (error.stderr or "").strip()
-        stdout = (error.stdout or "").strip()
-        details = stderr or stdout or "No SSH output was captured."
-        message = f"SSH exited with code {error.returncode}. {details}"
+        message = f"SSH exited with code {error.returncode}. See SSH output above."
         report_ssh_error(f"SSH task failed: {set_name}", message)
         raise
 
