@@ -11,9 +11,9 @@ import shutil
 import struct
 from ctypes import Structure, WinDLL, byref, c_bool, c_uint32, c_void_p, c_wchar_p
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from winutils_python import config as config_utils
 from winutils_python import config_sets, config_validation, connect_smb, visual
@@ -43,7 +43,7 @@ DEFAULT_SECTION = r'''adjust_file_creation_date:
 
 INVALID_HANDLE_VALUE = c_void_p(-1).value
 WINDOWS_TICK = 10_000_000
-WINDOWS_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
+WINDOWS_EPOCH = datetime(1601, 1, 1, tzinfo=UTC)
 CONFIG_SECTION = "adjust_file_creation_date"
 MODE_FILE = "file"
 MODE_FOLDER = "folder"
@@ -62,7 +62,7 @@ EXIF_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".tif", ".tiff"}
 QUICKTIME_VIDEO_EXTENSIONS = {".3g2", ".3gp", ".m4v", ".mov", ".mp4"}
 EXIF_DATETIME_TAGS = (0x9003, 0x9004, 0x0132)
 METADATA_DATETIME_FORMATS = ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S")
-QUICKTIME_EPOCH = datetime(1904, 1, 1, tzinfo=timezone.utc)
+QUICKTIME_EPOCH = datetime(1904, 1, 1, tzinfo=UTC)
 QUICKTIME_CONTAINER_ATOMS = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"udta", b"meta", b"ilst"}
 QUICKTIME_CREATION_TIME_ATOMS = {b"mvhd", b"tkhd", b"mdhd"}
 
@@ -165,13 +165,23 @@ def mode_from_config(script_config: dict[str, Any], set_name: str) -> str:
 def change_files_in_place_from_config(script_config: dict[str, Any]) -> bool:
     """Return whether matching files should be modified in place."""
 
-    return bool(script_config.get("change_files_in_place", True))
+    return config_utils.optional_bool(
+        script_config,
+        "change_files_in_place",
+        label="change_files_in_place",
+        default=True,
+    )
 
 
 def overwrite_from_config(script_config: dict[str, Any]) -> bool:
     """Return whether copied target files may be overwritten."""
 
-    return bool(script_config.get("overwrite", False))
+    return config_utils.optional_bool(
+        script_config,
+        "overwrite",
+        label="overwrite",
+        default=False,
+    )
 
 
 def target_folder_from_config(
@@ -281,7 +291,7 @@ def validate_script_config(script_config: dict[str, Any], set_name: str) -> None
 def datetime_to_filetime(timestamp: datetime) -> tuple[int, int]:
     """Convert a Python datetime into low/high Windows FILETIME integers."""
 
-    utc_timestamp = timestamp.astimezone(timezone.utc)
+    utc_timestamp = timestamp.astimezone(UTC)
     ticks = int((utc_timestamp - WINDOWS_EPOCH).total_seconds() * WINDOWS_TICK)
     return ticks & 0xFFFFFFFF, ticks >> 32
 
@@ -514,7 +524,7 @@ def timestamp_from_tiff(data: bytes) -> datetime | None:
     return timestamp_from_ifd_chain(data, endian, first_ifd_offset, visited=set())
 
 
-def tiff_endian(data: bytes) -> str | None:
+def tiff_endian(data: bytes) -> Literal["little", "big"] | None:
     """Return the byte order for TIFF metadata."""
 
     if data.startswith(b"II*\x00"):
@@ -526,7 +536,13 @@ def tiff_endian(data: bytes) -> str | None:
     return None
 
 
-def timestamp_from_ifd_chain(data: bytes, endian: str, offset: int, *, visited: set[int]) -> datetime | None:
+def timestamp_from_ifd_chain(
+    data: bytes,
+    endian: Literal["little", "big"],
+    offset: int,
+    *,
+    visited: set[int],
+) -> datetime | None:
     """Search an IFD and linked/sub IFDs for EXIF date/time tags."""
 
     if offset in visited or offset + 2 > len(data):
@@ -568,7 +584,11 @@ def timestamp_from_ifd_chain(data: bytes, endian: str, offset: int, *, visited: 
     return None
 
 
-def tiff_ifd_entry(data: bytes, endian: str, offset: int) -> tuple[int, int, int, int]:
+def tiff_ifd_entry(
+    data: bytes,
+    endian: Literal["little", "big"],
+    offset: int,
+) -> tuple[int, int, int, int]:
     """Return tag, type, count, and integer value/offset from one TIFF IFD entry."""
 
     tag = int.from_bytes(data[offset : offset + 2], endian)
@@ -578,7 +598,13 @@ def tiff_ifd_entry(data: bytes, endian: str, offset: int) -> tuple[int, int, int
     return tag, field_type, count, value_offset
 
 
-def tiff_ascii_value(data: bytes, endian: str, field_type: int, count: int, value_offset: int) -> str | None:
+def tiff_ascii_value(
+    data: bytes,
+    endian: Literal["little", "big"],
+    field_type: int,
+    count: int,
+    value_offset: int,
+) -> str | None:
     """Return an ASCII string from a TIFF IFD entry value."""
 
     if field_type != 2 or count <= 0:
@@ -640,7 +666,7 @@ def write_image_metadata_timestamp(path: Path, timestamp: datetime) -> None:
 def quicktime_seconds(timestamp: datetime) -> int:
     """Return QuickTime epoch seconds for a local or aware datetime."""
 
-    seconds = int((timestamp.astimezone(timezone.utc) - QUICKTIME_EPOCH).total_seconds())
+    seconds = int((timestamp.astimezone(UTC) - QUICKTIME_EPOCH).total_seconds())
     if seconds < 0:
         raise ValueError(f"Timestamp predates the QuickTime epoch: {timestamp:%Y-%m-%d %H:%M:%S}")
 
@@ -967,7 +993,7 @@ def adjust_files_from_filenames(
             )
             if result is not None:
                 results.append(result)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             visual.print_error(f"File creation date adjustment failed: {source_file}: {error}")
             results.append(FileAdjustmentResult(source_file, error=error))
 
@@ -1013,7 +1039,7 @@ def adjust_files_from_folder_names(
             )
             if result is not None:
                 results.append(result)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             visual.print_error(f"Folder-based file creation date adjustment failed: {source_file}: {error}")
             results.append(FileAdjustmentResult(source_file, error=error))
 
@@ -1054,7 +1080,7 @@ def adjust_files_from_metadata(
             )
             if result is not None:
                 results.append(result)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             visual.print_error(f"Metadata-based file creation date adjustment failed: {source_file}: {error}")
             results.append(FileAdjustmentResult(source_file, error=error))
 
@@ -1127,7 +1153,7 @@ def adjust_files_from_modification_dates_to_metadata(
             )
             if result is not None:
                 results.append(result)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             visual.print_error(f"Reverse metadata adjustment failed: {source_file}: {error}")
             results.append(FileAdjustmentResult(source_file, error=error))
 

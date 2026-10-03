@@ -12,8 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from winutils_python import config as config_utils
-from winutils_python import config_validation
-from winutils_python import config_sets, connect_smb, visual
+from winutils_python import config_sets, config_validation, connect_smb, visual
 
 CONFIG_SECTION = "archive_media"
 
@@ -78,25 +77,25 @@ def get_creation_time(path: Path) -> datetime:
     else:
         timestamp = stat_result.st_ctime
 
-    return datetime.fromtimestamp(timestamp)
+    return datetime.fromtimestamp(timestamp).astimezone()
 
 
 def remove_destination_if_exists(destination: Path) -> None:
-    """Delete an existing destination file, symlink, or directory."""
+    """Delete an existing destination file or symlink."""
 
     if not destination.exists() and not destination.is_symlink():
         return
 
     if destination.is_dir() and not destination.is_symlink():
-        shutil.rmtree(destination)
-    else:
-        destination.unlink()
+        raise IsADirectoryError(f"Archive destination is an existing directory: {destination}")
+
+    destination.unlink()
 
 
 def move_media_to_dated_archive(source: Path, target: Path, extensions: set[str]) -> int:
     """Move matching media files from one source into dated archive folders."""
 
-    validate_archive_source(source)
+    validate_archive_paths(source, target)
 
     moved_count = 0
 
@@ -168,6 +167,17 @@ def validate_archive_source(source: Path) -> None:
         raise NotADirectoryError(f"Archive source is not a directory: {source}")
 
 
+def validate_archive_paths(source: Path, target: Path) -> None:
+    """Reject archive targets that could be traversed from the source."""
+
+    validate_archive_source(source)
+    source_path = source.resolve()
+    target_path = target.resolve()
+
+    if target_path == source_path or source_path in target_path.parents:
+        raise ValueError(f"Archive target must not be the source or a folder below it: {source} → {target}")
+
+
 def get_media_extensions(script_config: dict[str, Any], set_name: str) -> set[str]:
     """Return normalized lowercase media extensions for a set."""
 
@@ -200,7 +210,7 @@ def run_archive_tasks(tasks: tuple[tuple[Path, Path], ...], extensions: set[str]
         try:
             moved_count = move_media_to_dated_archive(source, target, extensions)
             results.append(ArchiveTaskResult(source, target, moved_count=moved_count))
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             visual.print_error(f"Archive task failed: {source} → {target}: {error}")
             results.append(ArchiveTaskResult(source, target, error=error))
 
