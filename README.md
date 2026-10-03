@@ -302,6 +302,8 @@ Deployment targets:
 
 The script no longer uses a separate `release` directory. `dist` is cleaned after deployment, and generated `.spec` files are removed.
 
+`deploy.py` builds all tools with a console and skips an unavailable remote by default. To build a console-free `.pyw` tool yourself, run `uv run pyinstaller --onefile --noconsole connect_smb.pyw`. Place `config.yaml` beside each deployed executable.
+
 ## 🧩 Helper modules
 
 The `winutils_python` submodule provides reusable helpers:
