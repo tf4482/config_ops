@@ -1,6 +1,6 @@
 [project]
 name = "config-ops"
-version = "0.1.0"
+version = "1.4.0"
 description = "Configuration-driven Windows automation scripts for SMB, Robocopy, media archiving, SSH tasks, and peripherals."
 readme = "README.md"
 requires-python = ">=3.13"
