@@ -11,6 +11,7 @@ from unittest.mock import Mock
 import pytest
 
 import archive_media
+import file_operations
 import ssh_tasks
 from winutils_python import config, connect_smb, file_ops, menu, visual
 
@@ -38,6 +39,15 @@ def test_visual_output_is_preserved_without_tty() -> None:
 
     assert output.getvalue() == "✅ remote result\n"
     assert "\x1b[" not in output.getvalue()
+
+
+def test_visual_output_uses_utf8_when_redirected() -> None:
+    raw_output = io.BytesIO()
+    output = io.TextIOWrapper(raw_output, encoding="cp1252")
+
+    visual.print_visual("remote → result", emoji="success", stream=output)
+
+    assert raw_output.getvalue() == "✅ remote → result\n".encode()
 
 
 def test_non_interactive_menu_requires_set_argument(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -118,6 +128,26 @@ def test_mapped_smb_connection_remains_supported() -> None:
     ]
 
 
+def test_unc_coverage_requires_the_same_server_identity() -> None:
+    mappings = ((None, r"\\server.example\main"),)
+
+    assert connect_smb.unc_path_covered(r"\\server.example\main\data", mappings)
+    assert not connect_smb.unc_path_covered(r"\\server\main\data", mappings)
+
+
+def test_file_operations_reject_unmapped_unc_alias() -> None:
+    config_data = {
+        "smb": {"mappings": [{"share": r"\\server.example\main"}]},
+    }
+    operation_set = {
+        "smb": True,
+        "mirror": [{"source": r"C:\source", "target": r"\\server\main\data"}],
+    }
+
+    with pytest.raises(ValueError, match=r"\\\\server\\main.*without a matching SMB mapping"):
+        file_operations.validate_operation_set(config_data, operation_set, "backup")
+
+
 def test_robocopy_accepts_full_unc_path_without_drive_mapping() -> None:
     source = r"\\server.example\main\data\settings\wow_anniversary\WTF"
     command = file_ops.build_robocopy_command(
@@ -130,6 +160,27 @@ def test_robocopy_accepts_full_unc_path_without_drive_mapping() -> None:
     )
 
     assert command == ["robocopy", source, r"C:\backup\WTF", "/E"]
+
+
+def test_robocopy_oem_output_is_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    process = Mock(stdout=iter(["Robustes Dateikopieren für Windows\n"]))
+    process.wait.return_value = 0
+    popen = Mock(return_value=process)
+    print_plain = Mock()
+    monkeypatch.setattr(file_ops.subprocess, "Popen", popen)
+    monkeypatch.setattr(file_ops.visual, "print_plain", print_plain)
+
+    return_code = file_ops.invoke_robocopy(
+        r"C:\source",
+        r"C:\target",
+        ("/E",),
+        exclude_dirs=(),
+        exclude_files=(),
+    )
+
+    assert return_code == 0
+    assert popen.call_args.kwargs["encoding"] == "oem"
+    print_plain.assert_called_once_with("Robustes Dateikopieren für Windows\n")
 
 
 def test_strict_boolean_rejects_quoted_false() -> None:
