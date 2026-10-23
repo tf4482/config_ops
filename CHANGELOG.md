@@ -14,6 +14,7 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [
 
 ### Changed
 
+- Updated the shared frame: progress bar with percentage and gradient, `ssh.timeout_seconds` capped at one day.
 - Merged the former `winutils_python` submodule and the six scripts into one package without duplicated code.
 - Replaced the `.pyw` scripts, `config.yaml`, and the obfuscated SMB password with `config.yml` and an optional `smb.password_file` (default `~/.config/.smbcredentials`).
 - Flattened Robocopy groups into a `tasks` list with a `type` per task.

@@ -47,3 +47,16 @@ class Printer:
         if self.color and color:
             text = f"\033[{color}m{text}\033[0m"
         print(text, file=self.stream)
+
+
+# Shared color of menu frames and progress bars: position of last,
+# blended from pink through gold to turquoise
+def tint(position: int, last: int) -> str:
+    percent = 100 * max(0, min(position, last)) // max(last, 1)
+    start, end = ((255, 45, 145), (255, 190, 65))
+    if percent > 50:
+        percent -= 50
+        start, end = end, (45, 220, 195)
+    mix = min(percent * 2, 100)
+    red, green, blue = (a + (b - a) * mix // 100 for a, b in zip(start, end, strict=True))
+    return f"\033[38;2;{red};{green};{blue}m"

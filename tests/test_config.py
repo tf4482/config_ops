@@ -98,3 +98,10 @@ def test_invalid_documents_are_rejected(change: Any, message: str) -> None:
 
     with pytest.raises(ConfigError, match=message):
         parse_config(document)
+
+
+def test_ssh_timeout_is_capped_at_one_day() -> None:
+    document = config_document()
+    document["ssh"]["remote_backup"]["timeout_seconds"] = 10**6
+
+    assert parse_config(document).ssh["remote_backup"].timeout_seconds == 86400.0

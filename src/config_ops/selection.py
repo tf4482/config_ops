@@ -8,10 +8,8 @@ import sys
 import time
 from collections.abc import Sequence
 
-from .output import Printer
+from .output import Printer, tint
 
-# Gradient stops of the frame: pink, gold, turquoise
-TINTS = ((255, 45, 145), (255, 190, 65), (45, 220, 195))
 # Look of the marker dot, which keeps changing color
 DOTS = "🔴🟠🟡🟢🔵🟣"
 INTERVAL_SECONDS = 0.4
@@ -58,8 +56,9 @@ def choose(printer: Printer, title: str, items: Sequence[str]) -> int | None:
         ]
         rows.append(("╰─", footer, width + 3 - cell_width(footer), "╯"))
         for index, (left, text, dashes, right) in enumerate(rows):
-            tint = _tint(index, len(rows) - 1)
-            stream.write(f"\r\033[K{paint(left, tint)}{text}{paint('─' * dashes + right, tint)}\n")
+            shade = tint(index, len(rows) - 1)
+            border = paint("─" * dashes + right, shade)
+            stream.write(f"\r\033[K{paint(left, shade)}{text}{border}\n")
         stream.flush()
 
     selected = 0
@@ -86,15 +85,6 @@ def choose(printer: Printer, title: str, items: Sequence[str]) -> int | None:
     finally:
         stream.write("\033[J\033[?25h")
         stream.flush()
-
-
-# Frame color of one line, blended across the gradient stops
-def _tint(line: int, last: int) -> str:
-    percent = 100 * line // max(last, 1)
-    start, end = TINTS[:2] if percent <= 50 else TINTS[1:]
-    mix = min((percent if percent <= 50 else percent - 50) * 2, 100)
-    red, green, blue = (a + (b - a) * mix // 100 for a, b in zip(start, end, strict=True))
-    return f"\033[38;2;{red};{green};{blue}m"
 
 
 # Terminal cells of a text; emojis take two

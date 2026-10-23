@@ -116,7 +116,7 @@ def positive_int(values: Mapping[str, Any], key: str, location: str) -> int:
     return value
 
 
-# Positive finite seconds as float
+# Positive finite seconds as float, at most one day
 def positive_seconds(values: Mapping[str, Any], key: str, location: str) -> float:
     value = values.get(key)
     if (
@@ -126,4 +126,4 @@ def positive_seconds(values: Mapping[str, Any], key: str, location: str) -> floa
         or value <= 0
     ):
         raise ConfigError(f"{location}.{key} must be a positive number")
-    return float(value)
+    return min(float(value), 86400.0)
