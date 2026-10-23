@@ -1,178 +1,93 @@
-# Config Ops ⚙️
+# ⚙️ config_ops
 
-Configuration-driven Windows utilities for recurring file, network, media, SSH, and peripheral tasks. Every tool reads named sets from one `config.yaml`, validates them, and reports progress with colorful output.
+Configuration-driven Windows automation in a single binary: SMB shares, Robocopy sets, media archiving, file dates, SSH commands, and URL-controlled devices. Every task is a named set in one strictly validated `config.yml`, so recurring jobs run the same way every time.
 
-## Features ✨
+## ✨ Features
 
-- **File operations** 📂 (`file_operations.py`): Named Robocopy sets with `mirror`, `copy`, `move`, and bidirectional `sync`.
-- **Media archive** 🗃️ (`archive_media.py`): Moves media recursively into `YYYY/MM/DD` folders by creation date.
-- **Timestamp adjustment** 🕒 (`adjust_file_creation_date.py`): Sets Windows file times from filenames, folder names, or EXIF/QuickTime metadata; reverse mode writes modification dates into metadata.
-- **SMB connections** 🔌 (`connect_smb.pyw`): Connects shares as drive mappings or direct UNC sessions; prompted passwords are stored obfuscated.
-- **SSH tasks** 🔐 (`ssh_tasks.py`): Runs named non-interactive SSH commands with optional timeouts.
-- **Peripherals** 💡 (`peripherals.pyw`): Triggers URL-controlled devices (`on`, `off`, `toggle`, `suspend`, `resume`) and keeps their state in the registry.
-- **Deployment** 📦 (`deploy.py`): Builds all scripts as executables and copies them locally and optionally to a remote host.
+- 🔌 **SMB**: Connects shares as drive mappings or direct UNC sessions with `net use`.
+- 📦 **Files**: Runs Robocopy `mirror`, `copy`, `move`, and bidirectional `sync` tasks per set.
+- 🗃️ **Archive**: Moves media recursively into `YYYY/MM/DD` folders by creation date.
+- 🕒 **Dates**: Sets Windows file times from filenames, folder names, or EXIF/QuickTime metadata, or writes metadata from file times.
+- 🔐 **SSH**: Runs a named command over `ssh` without ever prompting, with a timeout.
+- 💡 **Peripherals**: Triggers device URLs (`on`, `off`, `toggle`, `suspend`, `resume`) and keeps their state in the registry.
+- 🛡️ **Strict config**: Unknown keys, wrong types, and `CHANGE_ME` placeholders are rejected with a dotted path.
+- 🎨 **Clear output**: One colored emoji line per event; exit codes `0`, `1`, and `130`.
 
-## Prerequisites 📋
+## 📦 Install
 
-- Windows with Python 3.13 or newer
-- [uv](https://docs.astral.sh/uv/) and Git
-- `robocopy`, `net use`, `curl.exe`, and OpenSSH `ssh` (plus `scp` for remote deployment), depending on the tool
-
-## Installation 🚀
-
-1. Clone the repository:
-
-   ```powershell
-   git clone <repository-url> config_ops
-   cd config_ops
-   ```
-
-2. Install the dependencies:
-
-   ```powershell
-   uv sync
-   ```
-
-3. Run a tool once. It creates `config.yaml`, appends an example for its missing section, and exits. Edit the values and run it again.
-
-## Configuration ⚙️
-
-`config.yaml` lives next to the script (or the executable when frozen) and is not tracked by Git. Named tools take a set name as first argument; without one, an interactive menu appears. Unattended runs must pass the set name.
-
-| Section | Used by | Purpose |
-| --- | --- | --- |
-| `smb` | all tools with `smb: true` | User, stored password, and share mappings |
-| `file_operations` | `file_operations.py` | Sets with `mirror`, `copy`, `move`, `sync`, `robocopy` options |
-| `archive_media` | `archive_media.py` | Sets with `extensions` and `tasks` (`source`, `target`) |
-| `adjust_file_creation_date` | `adjust_file_creation_date.py` | Sets with `mode`, folders, `extensions`, `patterns`, `hour_adjustment` |
-| `ssh` | `ssh_tasks.py` | Sets with `user`, `host`, `port`, `timeout`, `command` |
-| `peripherals` | `peripherals.pyw` | `registry_path` plus devices with `on`/`off` URLs |
-
-```yaml
-smb:
-  user: 'DOMAIN\user'
-  mappings:
-    - share: '\\server\shared'         # direct UNC session
-    - drive: 'R:'                      # persistent drive mapping
-      share: '\\server\backup'
-
-file_operations:
-  backup:
-    smb: true
-    mirror:
-      - source: 'C:\data'
-        target: 'R:\data'
-    sync:
-      - source: 'C:\notes'
-        target: 'R:\notes'
-
-archive_media:
-  phone_photos:
-    smb: true
-    extensions: ['.jpg', '.png', '.mp4']
-    tasks:
-      - source: 'C:\phone-import'
-        target: 'R:\photos'
-
-adjust_file_creation_date:
-  screenshots:
-    mode: file                         # file | folder | metadata | metadata_reverse
-    source_folder: 'C:\screenshots'
-    target_folder: ''
-    extensions: ['.jpg', '.png']
-    change_files_in_place: true
-    overwrite: true
-    hour_adjustment: 0
-    patterns:
-      - pattern: '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})'
-
-ssh:
-  remote_backup:
-    user: 'user'
-    host: '192.0.2.12'
-    port: 22
-    timeout: 300
-    command: 'manual_backup.bash'
-
-peripherals:
-  registry_path: 'Software\peripherals'
-  led:
-    'on': 'https://example.invalid/led/on'
-    'off': 'https://example.invalid/led/off'
-```
-
-### Behavior notes 📝
-
-- **SMB**: `smb: true` in a set uses the top-level `smb` section. Without a stored password, interactive runs prompt once; unattended runs fail fast.
-- **Mirror** can delete extra target content. **Sync** keeps newer files, never purges, and rejects identical or nested folders. Robocopy exit codes below `8` count as success.
-- **Archive** replaces an existing destination file; the target must not be inside the source.
-- **Timestamp modes**: `file` (filename, source folder only), `folder` (folder name, recursive), `metadata` (EXIF/QuickTime, recursive), `metadata_reverse` (modification time into metadata, recursive).
-
-## Usage 🖥️
-
-Start a tool with a set name, or without one for the menu:
+Requires Windows, [uv](https://docs.astral.sh/uv/), and the system tools `robocopy`, `net`, `curl.exe`, and OpenSSH `ssh` (plus `scp` to deploy remotely).
 
 ```powershell
-uv run python file_operations.py backup
-uv run python archive_media.py phone_photos
-uv run python adjust_file_creation_date.py screenshots
-uv run python ssh_tasks.py remote_backup
-uv run python connect_smb.pyw
-uv run python peripherals.pyw led on
+git clone <repository-url> config_ops
+cd config_ops
+uv sync
 ```
 
-### Examples
+## 🧭 Tools
 
-```powershell
-# Back up and sync folders to a network share
-uv run python file_operations.py backup
+- **Sets**: `files`, `archive`, `dates`, and `ssh` take the name of a configured set. Sets with `smb: true` connect all shares first.
+- **Files**: `mirror` can delete extra target content. `sync` keeps the newer file, never purges, and rejects identical or nested folders. UNC paths need a matching `smb.mappings` share. Robocopy exit codes below `8` count as success.
+- **Archive**: Replaces an existing file at the destination; the target must not be inside the source.
+- **Dates**: `file` reads the filename (source folder only), `folder` the containing folder name, `metadata` the embedded EXIF/QuickTime time, and `metadata_reverse` writes the modification time into the metadata. All but `file` scan recursively.
+- **Peripherals**: Words select devices and one command, e.g. `led off`; `toggle` is the default.
 
-# Toggle all devices, or only specific ones
-uv run python peripherals.pyw
-uv run python peripherals.pyw led boxen off
+## ⚙️ Configuration
 
-# Pick a set interactively
-uv run python archive_media.py
-```
+`config.yml` is read from the first existing location, without merging: beside the executable, then `~/.config/config_ops/config.yml`. On the first run the template is created at the second location and the app exits with `1`. Edit it, replace every `CHANGE_ME`, and rerun. Quote `"on"` and `"off"` keys, since YAML reads them as booleans.
 
-Each run prints start, progress, and a summary; any failure ends with a non-zero exit code, so the tools work in scheduled tasks.
-
-## Project Structure 📁
-
-| Path | Purpose |
+| Section | Keys |
 | --- | --- |
-| `file_operations.py`, `archive_media.py`, `adjust_file_creation_date.py`, `ssh_tasks.py` | Set-based task scripts (each is self-contained) |
-| `connect_smb.pyw`, `peripherals.pyw` | Windowless helper scripts |
-| `deploy.py` | Build and copy executables (local only, not tracked) |
-| `tests/` | Automated tests |
-| `config.yaml` | Local configuration (not tracked) |
-| `LICENSE` | License terms |
+| `smb` | `user`, `password`, `mappings` (`share`, optional `drive`) |
+| `files.<set>` | `smb`, `common_options`, `tasks` (`type`, `source`, `target`, `overwrite`, `options`) |
+| `archive.<set>` | `smb`, `extensions`, `tasks` (`source`, `target`) |
+| `dates.<set>` | `smb`, `mode`, `source_folder`, `extensions`, `patterns`, `target_folder`, `change_files_in_place`, `overwrite`, `hour_adjustment` |
+| `ssh.<set>` | `user`, `host`, `port`, `timeout_seconds`, `command` |
+| `peripherals` | `registry_path`, `devices.<name>` (`on`, `off`) |
 
-## Development 🔧
+All sections are optional; see [config.example.yml](config.example.yml) for a complete file.
 
-Run the tests:
+## 🚀 Usage
 
 ```powershell
+config_ops                          # list configured sets and devices
+config_ops smb                      # connect all shares
+config_ops files backup             # run the Robocopy tasks of a set
+config_ops archive photos           # archive media by creation date
+config_ops dates screenshots        # set file dates from names or metadata
+config_ops ssh remote_backup        # run an SSH command
+config_ops peripherals led off      # switch one device off
+config_ops peripherals              # toggle all devices
+config_ops --help
+```
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Everything succeeded |
+| `1` | Configuration, validation, dependency, or runtime error |
+| `130` | Interrupted by the user |
+
+## ⏱️ Deploy
+
+Build the single binary and copy `dist/config_ops.exe` to a folder on `PATH`, for example `~/bin`:
+
+```powershell
+uv run pyinstaller config_ops.spec
+```
+
+Put `config.yml` next to the executable or in `~/.config/config_ops/`. Schedule runs with the Windows Task Scheduler, for example `config_ops.exe files backup` daily; the app runs once and exits.
+
+## 🧪 Develop
+
+```powershell
+uv sync
+uv run ruff check
+uv run ruff format --check
+uv run pyright
 uv run pytest
 ```
 
-Build and deploy all scripts as executables to `~/bin` and the configured remote host:
+`main.py` starts the app from source: `uv run main.py files backup`.
 
-```powershell
-uv run python deploy.py
-```
+## 📜 License
 
-## Contributing 🤝
-
-Contributions are welcome! Open an issue to report a bug or suggest an improvement.
-
-To contribute code:
-
-1. Fork the repository and create a branch.
-2. Make your changes and update relevant tests and documentation.
-3. Run the available checks.
-4. Submit a pull request describing your changes.
-
-## License 📜
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+[MIT](LICENSE)
