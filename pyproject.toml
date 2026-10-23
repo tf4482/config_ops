@@ -1,12 +1,13 @@
 [project]
-name = "config-ops"
-version = "1.4.0"
-description = "Configuration-driven Windows automation scripts for SMB, Robocopy, media archiving, SSH tasks, and peripherals."
+name = "config_ops"
+version = "0.1.0"
+description = "Configuration-driven Windows automation: SMB, Robocopy, media archiving, file dates, SSH, and peripherals."
 readme = "README.md"
-requires-python = ">=3.13"
+license = "MIT"
+requires-python = ">=3.12"
 dependencies = [
     "exif>=1.6.1",
-    "winutils-python",
+    "pyyaml>=6.0.3",
 ]
 keywords = [
     "automation",
@@ -19,28 +20,43 @@ keywords = [
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Environment :: Win32 (MS Windows)",
+    "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.12",
     "Topic :: System :: Archiving :: Backup",
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
 ]
 
+[project.scripts]
+config_ops = "config_ops:main"
+
+[build-system]
+requires = ["uv_build>=0.9.0,<0.10.0"]
+build-backend = "uv_build"
+
 [dependency-groups]
 dev = [
-    "pyinstaller>=6.21.0",
-    "pytest>=9.0.0",
+    "pre-commit",
+    "pyinstaller",
+    "pyright",
+    "pytest",
+    "pytest-cov",
+    "ruff",
 ]
 
-[tool.uv]
-package = false
+[tool.ruff]
+target-version = "py312"
+line-length = 100
 
-[tool.uv.sources]
-winutils-python = { path = "winutils_python", editable = true }
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+pythonVersion = "3.12"
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "-ra"
