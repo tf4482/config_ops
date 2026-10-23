@@ -30,10 +30,10 @@ Usage:
 
 Configuration:
   Uses the first existing file without merging:
-  1. config.yml beside the executable
-  2. ~/.config/{PROJECT_NAME}/config.yml
+  1. ~/.config/{PROJECT_NAME}/config.yml
+  2. config.yml beside the executable
   The working directory is not searched.
-  With no file, creates a user-only template at location 2 and exits 1.
+  With no file, creates a user-only template at location 1 and exits 1.
 
 Behavior:
   Without arguments on a terminal, shows a menu of all configured tasks.

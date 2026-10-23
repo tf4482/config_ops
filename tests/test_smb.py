@@ -68,3 +68,18 @@ def test_unusable_password_files_are_rejected_without_content(
 def test_missing_password_file_is_reported(tmp_path: Path) -> None:
     with pytest.raises(smb.SmbError, match="cannot read password file"):
         smb.read_password("missing.pass", tmp_path)
+
+
+def test_password_file_defaults_to_the_user_config_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("USERPROFILE", "/home/example")
+    monkeypatch.setenv("HOME", "/home/example")
+
+    expected = Path("/home/example/.config/.smbcredentials")
+    assert smb.password_path(None, Path("bin")) == expected.expanduser()
+
+
+def test_password_file_name_is_looked_up_beside_the_executable(tmp_path: Path) -> None:
+    absolute = tmp_path / "elsewhere" / "smb.pass"
+
+    assert smb.password_path("smb.pass", tmp_path / "bin") == tmp_path / "bin" / "smb.pass"
+    assert smb.password_path(str(absolute), tmp_path / "bin") == absolute

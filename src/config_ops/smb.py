@@ -9,6 +9,8 @@ from .config import SmbMapping, SmbSettings
 from .configfile import launcher_dir
 from .output import GREEN, YELLOW, Printer
 
+# Password file when the configuration names none
+DEFAULT_PASSWORD_FILE = "~/.config/.smbcredentials"
 # Exit codes of "net use"
 NET_USE_OK = 0
 NET_USE_ALREADY_ASSIGNED = 2
@@ -40,9 +42,9 @@ def connect(printer: Printer, smb: SmbSettings, directory: Path | None = None) -
         raise SmbError(f"{len(failed)} connection(s) failed: {', '.join(failed)}")
 
 
-# Password from a file beside the executable; trailing line breaks are dropped
-def read_password(password_file: str, directory: Path | None = None) -> str:
-    path = (directory or launcher_dir()) / password_file
+# Password from the configured file; trailing line breaks are dropped
+def read_password(password_file: str | None, directory: Path | None = None) -> str:
+    path = password_path(password_file, directory)
     try:
         password = path.read_text(encoding="utf-8-sig").rstrip("\r\n")
     except UnicodeError:
@@ -53,6 +55,12 @@ def read_password(password_file: str, directory: Path | None = None) -> str:
     if not password:
         raise SmbError(f"password file {path} is empty")
     return password
+
+
+# Default file, an absolute or ~ path as given, anything else beside the executable
+def password_path(password_file: str | None, directory: Path | None = None) -> Path:
+    path = Path(password_file or DEFAULT_PASSWORD_FILE).expanduser()
+    return path if path.is_absolute() else (directory or launcher_dir()) / path
 
 
 # Open one mapped or deviceless connection and return the "net use" exit code

@@ -1,5 +1,6 @@
 # Shared configuration frame: lookup, first-run template, strict validation helpers.
 # Copy unchanged; the app supplies DEFAULT_CONFIG, Config, and parse_config in config.py.
+# Project deviation: the user directory is searched before the executable directory.
 from __future__ import annotations
 
 import math
@@ -43,7 +44,7 @@ def load_config[T](
     home: Path | None = None,
 ) -> tuple[Path, T]:
     user_path = (home or Path.home()) / ".config" / PROJECT_NAME / CONFIG_FILENAME
-    candidates = ((executable_dir or launcher_dir()) / CONFIG_FILENAME, user_path)
+    candidates = (user_path, (executable_dir or launcher_dir()) / CONFIG_FILENAME)
     selected = next((path for path in candidates if path.is_file()), None)
     if selected is None:
         _create_default_config(user_path, default_config)

@@ -21,21 +21,32 @@ def locations(tmp_path: Path) -> tuple[Path, Path]:
     return beside, home
 
 
-def test_config_beside_executable_takes_precedence(tmp_path: Path) -> None:
+def test_user_config_takes_precedence_over_executable_directory(tmp_path: Path) -> None:
     beside, home = locations(tmp_path)
-    (beside / "config.yml").write_text(VALID, encoding="utf-8")
-    (home / ".config" / "config_ops" / "config.yml").write_text("ssh: {}\n", encoding="utf-8")
+    (beside / "config.yml").write_text("ssh: {}\n", encoding="utf-8")
+    user_file = home / ".config" / "config_ops" / "config.yml"
+    user_file.write_text(VALID, encoding="utf-8")
 
     path, config = load_config(DEFAULT_CONFIG, parse_config, executable_dir=beside, home=home)
 
-    assert path == beside / "config.yml"
+    assert path == user_file
     assert config.smb is not None
+
+
+def test_executable_directory_is_used_without_user_config(tmp_path: Path) -> None:
+    beside, home = locations(tmp_path)
+    (beside / "config.yml").write_text(VALID, encoding="utf-8")
+
+    path, _ = load_config(DEFAULT_CONFIG, parse_config, executable_dir=beside, home=home)
+
+    assert path == beside / "config.yml"
 
 
 def test_invalid_config_does_not_fall_back_or_reveal_content(tmp_path: Path) -> None:
     beside, home = locations(tmp_path)
-    (beside / "config.yml").write_text("smb: [unclosed secret-token\n", encoding="utf-8")
-    (home / ".config" / "config_ops" / "config.yml").write_text(VALID, encoding="utf-8")
+    user_file = home / ".config" / "config_ops" / "config.yml"
+    user_file.write_text("smb: [unclosed secret-token\n", encoding="utf-8")
+    (beside / "config.yml").write_text(VALID, encoding="utf-8")
 
     with pytest.raises(ConfigError) as caught:
         load_config(DEFAULT_CONFIG, parse_config, executable_dir=beside, home=home)

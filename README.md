@@ -30,15 +30,16 @@ uv sync
 - **Files**: `mirror` can delete extra target content. `sync` keeps the newer file, never purges, and rejects identical or nested folders. UNC paths need a matching `smb.mappings` share. Robocopy exit codes below `8` count as success.
 - **Archive**: Replaces an existing file at the destination; the target must not be inside the source.
 - **Dates**: `file` reads the filename (source folder only), `folder` the containing folder name, `metadata` the embedded EXIF/QuickTime time, and `metadata_reverse` writes the modification time into the metadata. All but `file` scan recursively.
+- **SMB password**: Read from the file named by `smb.password_file`. A bare file name is looked up beside the executable, an absolute or `~` path is used as given. Without the key, `~/.config/.smbcredentials` is used. The file holds only the password in UTF-8.
 - **Peripherals**: Words select devices and one command, e.g. `led off`; `toggle` is the default.
 
 ## ⚙️ Configuration
 
-`config.yml` is read from the first existing location, without merging: beside the executable, then `~/.config/config_ops/config.yml`. On the first run the template is created at the second location and the app exits with `1`. Edit it, replace every `CHANGE_ME`, and rerun. Quote `"on"` and `"off"` keys, since YAML reads them as booleans.
+`config.yml` is read from the first existing location, without merging: `~/.config/config_ops/config.yml`, then beside the executable. On the first run the template is created at the first location and the app exits with `1`. Edit it, replace every `CHANGE_ME`, and rerun. Quote `"on"` and `"off"` keys, since YAML reads them as booleans.
 
 | Section | Keys |
 | --- | --- |
-| `smb` | `user`, `password_file`, `mappings` (`share`, optional `drive`) |
+| `smb` | `user`, optional `password_file`, `mappings` (`share`, optional `drive`) |
 | `files.<set>` | `smb`, `common_options`, `tasks` (`type`, `source`, `target`, `overwrite`, `options`) |
 | `archive.<set>` | `smb`, `extensions`, `tasks` (`source`, `target`) |
 | `dates.<set>` | `smb`, `mode`, `source_folder`, `extensions`, `patterns`, `target_folder`, `change_files_in_place`, `overwrite`, `hour_adjustment` |
@@ -76,7 +77,7 @@ Build the single binary and copy `dist/config_ops.exe` to a folder on `PATH`, fo
 uv run pyinstaller config_ops.spec
 ```
 
-Put `config.yml` next to the executable or in `~/.config/config_ops/`. Schedule runs with the Windows Task Scheduler, for example `config_ops.exe files backup` daily; the app runs once and exits.
+Put `config.yml` in `~/.config/config_ops/` or next to the executable. Schedule runs with the Windows Task Scheduler, for example `config_ops.exe files backup` daily; the app runs once and exits.
 
 ## 🧪 Develop
 

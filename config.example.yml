@@ -1,7 +1,9 @@
 # SMB shares for sets with "smb: true"; drop the section when unused
 smb:
-  user: 'DOMAIN\user'
-  password_file: "CHANGE_ME"   # file beside the executable that holds the password
+  user: "CHANGE_ME"           # e.g. DOMAIN\user
+  # Password file: a bare file name is looked up beside the executable, a path is used as given.
+  # Default: ~/.config/.smbcredentials
+  # password_file: "smb.pass"
   mappings:
     - share: '\\server\main'
     - share: '\\server\backup'
