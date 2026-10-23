@@ -11,6 +11,7 @@ Configuration-driven Windows automation in a single binary: SMB shares, Robocopy
 - 🔐 **SSH**: Runs a named command over `ssh` without ever prompting, with a timeout.
 - 💡 **Peripherals**: Triggers device URLs (`on`, `off`, `toggle`, `suspend`, `resume`) and keeps their state in the registry.
 - 🛡️ **Strict config**: Unknown keys, wrong types, and `CHANGE_ME` placeholders are rejected with a dotted path.
+- 🎯 **Menu**: Starting without arguments (e.g. by double-click) shows an arrow-key menu of all tasks; `files`, `archive`, `dates`, and `ssh` offer a set menu when no set is given.
 - 🎨 **Clear output**: One colored emoji line per event; exit codes `0`, `1`, and `130`.
 
 ## 📦 Install
@@ -49,8 +50,9 @@ All sections are optional; see [config.example.yml](config.example.yml) for a co
 ## 🚀 Usage
 
 ```powershell
-config_ops                          # list configured sets and devices
+config_ops                          # task menu; a list of sets when output is redirected
 config_ops smb                      # connect all shares
+config_ops files                    # pick a set from a menu
 config_ops files backup             # run the Robocopy tasks of a set
 config_ops archive photos           # archive media by creation date
 config_ops dates screenshots        # set file dates from names or metadata

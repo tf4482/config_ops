@@ -1,7 +1,8 @@
 # Help text and the app's own flow.
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import sys
+from collections.abc import Callable, Mapping, Sequence
 
 from .archive import run_archive_set
 from .arguments import CommandLine, usage_error, usage_failure
@@ -11,6 +12,7 @@ from .dates import run_date_set
 from .files import FilesError, run_file_set
 from .output import YELLOW, Printer
 from .peripherals import PeripheralsError, run_peripherals
+from .selection import choose
 from .smb import SmbError, connect
 from .ssh import SshError, run_ssh_set
 
@@ -34,7 +36,9 @@ Configuration:
   With no file, creates a user-only template at location 2 and exits 1.
 
 Behavior:
-  Without arguments, lists the configured sets and devices.
+  Without arguments on a terminal, shows a menu of all configured tasks.
+  When output is redirected, lists the configured sets and devices instead.
+  files, archive, dates, and ssh show a set menu on a terminal when no set is given.
   smb connects all configured shares.
   files runs Robocopy mirror, copy, move, and sync tasks of one set.
   archive moves media into YYYY/MM/DD folders by creation date.
@@ -56,8 +60,53 @@ DOMAIN_ERRORS = (SmbError, FilesError, SshError, PeripheralsError, OSError)
 OPTIONS: Mapping[str, bool] = {}
 
 
-# Overview of the configured sets and devices
+# Task menu on a terminal, otherwise an overview of the configured sets and devices
 def execute(printer: Printer, config: Config, options: Mapping[str, str]) -> int:
+    tasks = _tasks(config)
+    if not tasks or not _interactive(printer):
+        return _overview(printer, config)
+    tool_width = max(len(tool) for tool, _, _ in tasks)
+    labels = [f"{tool:<{tool_width}}  {name}" for tool, name, _ in tasks]
+    index = 0 if len(tasks) == 1 else choose(printer, "🎯 Select a task", labels)
+    if index is None:
+        printer.line("⏭️", "Nothing selected", YELLOW)
+        return 0
+    tool, name, arguments = tasks[index]
+    printer.line("🎯", f"{tool} · {name}")
+    return COMMANDS[tool](printer, config, CommandLine({}, arguments))
+
+
+# Every task the menu can start: tool, display name, and its arguments
+def _tasks(config: Config) -> list[tuple[str, str, list[str]]]:
+    tasks: list[tuple[str, str, list[str]]] = []
+    if config.smb is not None:
+        tasks.append(("smb", "connect shares", []))
+    for tool, sets in (
+        ("files", config.files),
+        ("archive", config.archive),
+        ("dates", config.dates),
+        ("ssh", config.ssh),
+    ):
+        tasks += [(tool, name, [name]) for name in sets]
+    if config.peripherals is not None:
+        tasks.append(("peripherals", "toggle all devices", []))
+    return tasks
+
+
+# Name chosen from a menu; the only name needs no menu, None when cancelled
+def _pick(printer: Printer, title: str, names: Sequence[str]) -> str | None:
+    if len(names) == 1:
+        return names[0]
+    index = choose(printer, title, names)
+    return None if index is None else names[index]
+
+
+def _interactive(printer: Printer) -> bool:
+    return sys.stdin.isatty() and printer.stream.isatty()
+
+
+# Overview of the configured sets and devices
+def _overview(printer: Printer, config: Config) -> int:
     overview = (
         ("🔌", "smb", [share.share for share in config.smb.mappings] if config.smb else []),
         ("📦", "files", list(config.files)),
@@ -104,6 +153,14 @@ def _set_command[T](
     def command(printer: Printer, config: Config, arguments: CommandLine) -> int:
         available = sets(config)
         names = ", ".join(sorted(available)) or "none configured"
+        # Without a set name, a terminal gets a menu
+        if not arguments.positionals and available and _interactive(printer):
+            chosen = _pick(printer, f"🎯 Select a {section} set", list(available))
+            if chosen is None:
+                printer.line("⏭️", "Nothing selected", YELLOW)
+                return 0
+            printer.line("🎯", f"{section} · {chosen}")
+            arguments = CommandLine(arguments.options, [chosen])
         if len(arguments.positionals) != 1:
             return usage_failure(f"Expected one {section} set name (available: {names})")
         name = arguments.positionals[0]
