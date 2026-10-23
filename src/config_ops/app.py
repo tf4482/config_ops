@@ -210,7 +210,10 @@ def _guarded(printer: Printer, category: str, action: Callable[[], int]) -> int:
     try:
         return action()
     except DOMAIN_ERRORS as error:
-        return printer.fail(category, " ".join(str(error).split()))
+        # Share problems are named after SMB, whichever command hit them
+        return printer.fail(
+            "SMB" if isinstance(error, SmbError) else category, " ".join(str(error).split())
+        )
 
 
 COMMANDS: Mapping[str, Callable[[Printer, Config, CommandLine], int]] = {

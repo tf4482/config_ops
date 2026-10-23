@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from config_ops import smb
-from config_ops.config import SmbMapping
+from config_ops.config import SmbMapping, SmbSettings
+from config_ops.output import Printer
 
 SHARE = r"\\server.example\main"
 
@@ -35,7 +37,7 @@ def test_accessible_share_reuses_the_session(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(smb, "unc_share_accessible", lambda _share: True)
     monkeypatch.setattr(smb.subprocess, "run", run)
 
-    assert smb.run_net_use(None, SHARE, "secret", user="user") == 0
+    assert smb.run_net_use(None, SHARE, "secret", user="user").return_code == 0
     run.assert_not_called()
 
 
@@ -83,3 +85,33 @@ def test_password_file_name_is_looked_up_beside_the_executable(tmp_path: Path) -
 
     assert smb.password_path("smb.pass", tmp_path / "bin") == tmp_path / "bin" / "smb.pass"
     assert smb.password_path(str(absolute), tmp_path / "bin") == absolute
+
+
+def test_net_use_message_is_kept_and_the_password_is_masked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed = Mock(returncode=2, stdout="System error 1219 occurred. secret\n", stderr="")
+    monkeypatch.setattr(smb, "unc_share_accessible", lambda _share: False)
+    monkeypatch.setattr(smb.subprocess, "run", Mock(return_value=completed))
+
+    result = smb.run_net_use(None, SHARE, "secret", user="user")
+
+    assert result.return_code == 2
+    assert result.detail == "System error 1219 occurred. ***"
+
+
+def test_deviceless_failure_reports_the_message_not_a_drive_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = smb.NetUseResult(2, "System error 53 occurred.")
+    monkeypatch.setattr(smb, "run_net_use", lambda *_args, **_kwargs: failure)
+    monkeypatch.setattr(smb, "read_password", lambda *_args: "secret")
+    stream = io.StringIO()
+    settings = SmbSettings("user", None, (SmbMapping(SHARE, None), SmbMapping(SHARE, "R:")))
+
+    with pytest.raises(smb.SmbError, match="2 connection"):
+        smb.connect(Printer(stream, color=False), settings)
+
+    lines = stream.getvalue().splitlines()
+    assert "exit code 2 · System error 53 occurred." in lines[0]
+    assert "drive in use by another share" in lines[1]

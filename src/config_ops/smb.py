@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import SmbMapping, SmbSettings
@@ -21,22 +22,24 @@ class SmbError(RuntimeError):
     pass
 
 
+# Exit code of "net use" and its message without secrets
+@dataclass(frozen=True, slots=True)
+class NetUseResult:
+    return_code: int
+    detail: str = ""
+
+
 # Connect every mapping; raise after all attempts when any failed
 def connect(printer: Printer, smb: SmbSettings, directory: Path | None = None) -> None:
     password = read_password(smb.password_file, directory)
     failed: list[str] = []
     for mapping in smb.mappings:
         label = f"{mapping.drive} → {mapping.share}" if mapping.drive else mapping.share
-        return_code = run_net_use(mapping.drive, mapping.share, password, user=smb.user)
-        if return_code == NET_USE_OK:
+        result = run_net_use(mapping.drive, mapping.share, password, user=smb.user)
+        if result.return_code == NET_USE_OK:
             printer.line("✅", f"{label} · connected", GREEN)
         else:
-            reason = (
-                "drive in use by another share"
-                if return_code == NET_USE_ALREADY_ASSIGNED
-                else f"exit code {return_code}"
-            )
-            printer.line("⚠️", f"{label} · {reason}", YELLOW)
+            printer.line("⚠️", f"{label} · {_reason(mapping, result)}", YELLOW)
             failed.append(label)
     if failed:
         raise SmbError(f"{len(failed)} connection(s) failed: {', '.join(failed)}")
@@ -51,7 +54,8 @@ def read_password(password_file: str | None, directory: Path | None = None) -> s
         # The message of a decoding error could echo file content
         raise SmbError(f"password file {path} is not valid UTF-8") from None
     except OSError as error:
-        raise SmbError(f"cannot read password file {path}: {error.strerror}") from None
+        hint = "" if password_file else " (default file, set smb.password_file to change it)"
+        raise SmbError(f"cannot read password file {path}: {error.strerror}{hint}") from None
     if not password:
         raise SmbError(f"password file {path} is empty")
     return password
@@ -63,26 +67,31 @@ def password_path(password_file: str | None, directory: Path | None = None) -> P
     return path if path.is_absolute() else (directory or launcher_dir()) / path
 
 
-# Open one mapped or deviceless connection and return the "net use" exit code
-def run_net_use(drive: str | None, share: str, password: str, *, user: str) -> int:
+# Open one mapped or deviceless connection
+def run_net_use(drive: str | None, share: str, password: str, *, user: str) -> NetUseResult:
     # A deviceless share with a live session needs no new connection
     if drive is None and unc_share_accessible(share):
-        return NET_USE_OK
+        return NetUseResult(NET_USE_OK)
 
     result = subprocess.run(
         build_net_use_command(drive, share, password, user=user),
         check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        encoding="oem",
+        errors="replace",
     )
+    # "net use" never echoes the password, but the message is cleaned anyway
+    detail = " ".join(f"{result.stdout} {result.stderr}".replace(password, "***").split())
+    outcome = NetUseResult(result.returncode, detail)
     if result.returncode != NET_USE_ALREADY_ASSIGNED or drive is None:
-        return result.returncode
+        return outcome
 
     # An existing mapping of the same share counts as connected
     existing = _existing_drive_share(drive)
     if existing is not None and _normalize(existing) == _normalize(share):
-        return NET_USE_OK
-    return result.returncode
+        return NetUseResult(NET_USE_OK)
+    return outcome
 
 
 # Mapped connections persist, deviceless ones do not
@@ -129,6 +138,13 @@ def unc_path_covered(path: str, mappings: Sequence[SmbMapping]) -> bool:
         if (mapping_root := unc_share_root(mapping.share)) is not None
     }
     return _normalize(root) in covered
+
+
+# Why a connection failed; the message of "net use" says more than its exit code
+def _reason(mapping: SmbMapping, result: NetUseResult) -> str:
+    if mapping.drive and result.return_code == NET_USE_ALREADY_ASSIGNED:
+        return "drive in use by another share"
+    return f"exit code {result.return_code}" + (f" · {result.detail}" if result.detail else "")
 
 
 # Share currently mapped to a drive, if any
