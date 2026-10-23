@@ -8,6 +8,7 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [
 
 - Single `config_ops` binary with subcommands `smb`, `files`, `archive`, `dates`, `ssh`, and `peripherals`.
 - Strict `config.yml` with first-run template, placeholder rejection, and lookup in `~/.config/config_ops/` first, then beside the executable.
+- Compact, colored Robocopy results with a progress bar instead of the raw summary tables.
 - Arrow-key menus for tasks and sets on a terminal, including double-click starts.
 - `src` layout with the shared house frame, PyInstaller spec, ruff, pyright, and pre-commit setup.
 

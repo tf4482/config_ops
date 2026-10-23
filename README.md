@@ -11,6 +11,7 @@ Configuration-driven Windows automation in a single binary: SMB shares, Robocopy
 - 🔐 **SSH**: Runs a named command over `ssh` without ever prompting, with a timeout.
 - 💡 **Peripherals**: Triggers device URLs (`on`, `off`, `toggle`, `suspend`, `resume`) and keeps their state in the registry.
 - 🛡️ **Strict config**: Unknown keys, wrong types, and `CHANGE_ME` placeholders are rejected with a dotted path.
+- 📊 **Robocopy view**: A progress bar for the tasks of a set and one colored result line per task (copied, unchanged, removed, failed), with Robocopy's own output only on failures.
 - 🎯 **Menu**: Starting without arguments (e.g. by double-click) shows an arrow-key menu of all tasks; `files`, `archive`, `dates`, and `ssh` offer a set menu when no set is given.
 - 🎨 **Clear output**: One colored emoji line per event; exit codes `0`, `1`, and `130`.
 

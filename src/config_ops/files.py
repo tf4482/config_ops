@@ -1,48 +1,20 @@
 # Robocopy sets: mirror, copy, move, and bidirectional sync.
 from __future__ import annotations
 
-import subprocess
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
-from .config import FileKind, FileSet, FileTask, SmbSettings
-from .output import GREEN, RED, Printer
+from .config import FileSet, FileTask, SmbSettings
+from .output import CYAN, GREEN, RED, YELLOW, Printer
+from .progress import Progress
+from .robocopy import FAILURE_EXIT_CODE, Run, Stats, run_task
 from .smb import unc_path_covered, unc_share_root
 
-# Robocopy reports failures with exit codes from 8 up
-FAILURE_EXIT_CODE = 8
-EXCLUDE_DIRS = (
-    "cache",
-    "shadercache",
-    ".recycle",
-    "$RECYCLE.BIN",
-    "System Volume Information",
-    "My Music",
-    "My Videos",
-    "My Pictures",
-)
-EXCLUDE_FILES = ("desktop.ini",)
-COMMON_OPTIONS = (
-    "/MT:32",
-    "/W:2",
-    "/R:10",
-    "/XJ",
-    "/XC",
-    "/NJH",
-    "/NFL",
-    "/NDL",
-    "/NC",
-    "/NS",
-    "/NP",
-)
-# Options that are specific to one kind of operation
-KIND_OPTIONS: dict[FileKind, tuple[str, ...]] = {
-    "mirror": ("/MIR",),
-    "copy": ("/E",),
-    "move": ("/MOV", "/E"),
-    "sync": ("/E", "/XO"),
-}
-# Options that would make sync delete or overwrite newer files
-SYNC_INCOMPATIBLE_OPTIONS = {"/MIR", "/PURGE", "/MOV", "/MOVE", "/XC", "/XN", "/XL"}
+# Dim text for counters that carry no news
+DIM = "2"
+# Robocopy exit code bit for mismatched files
+MISMATCH_EXIT_CODE = 4
 
 
 # Invalid file task or folder layout
@@ -50,42 +22,87 @@ class FilesError(RuntimeError):
     pass
 
 
+# A finished task with its run and duration
+@dataclass(frozen=True, slots=True)
+class TaskResult:
+    task: FileTask
+    run: Run
+    seconds: float
+
+    @property
+    def failed(self) -> bool:
+        return self.run.return_code >= FAILURE_EXIT_CODE
+
+
 # Run all tasks of a set in order; returns 1 when any task failed
 def run_file_set(printer: Printer, file_set: FileSet, smb: SmbSettings | None) -> int:
     _check_unc_paths(file_set, smb)
     _prepare_all_sync_folders(file_set)
-    failed = 0
-    for task in file_set.tasks:
-        printer.line("📦", f"{task.kind} · {task.source} → {task.target}")
-        return_code = _run_task(printer, task, file_set.common_options)
-        if return_code >= FAILURE_EXIT_CODE:
-            printer.line("❌", f"{task.kind} · exit code {return_code}", RED)
-            failed += 1
-        else:
-            printer.line("✅", f"{task.kind} · exit code {return_code}", GREEN)
-    printer.line("📋", f"{len(file_set.tasks) - failed} succeeded · {failed} failed")
+    # Without a terminal there is no bar, so every task reports as soon as it is done
+    live = not printer.stream.isatty()
+    results: list[TaskResult] = []
+    with Progress(printer, "Robocopy", len(file_set.tasks)) as bar:
+        for task in file_set.tasks:
+            if live:
+                _announce(printer, task)
+            started = time.monotonic()
+            run = run_task(task, file_set.common_options)
+            results.append(TaskResult(task, run, time.monotonic() - started))
+            if live:
+                report(printer, results[-1])
+            bar.step(f"{task.kind} · {Path(task.source).name or task.source}")
+    # The bar is gone now, so the lines of a terminal run can follow
+    if not live:
+        for result in results:
+            _announce(printer, result.task)
+            report(printer, result)
+    failed = sum(result.failed for result in results)
+    printer.line("📋", f"{len(results) - failed} succeeded · {failed} failed")
     return 1 if failed else 0
 
 
-# Command line of one Robocopy call
-def build_robocopy_command(
-    source: str, target: str, options: tuple[str, ...], *, overwrite: bool
-) -> list[str]:
-    effective = options if overwrite else (*options, "/XN", "/XO", "/XX")
-    excludes = [item for name in EXCLUDE_DIRS for item in ("/XD", name)]
-    excludes += [item for name in EXCLUDE_FILES for item in ("/XF", name)]
-    return ["robocopy", source, target, *effective, *excludes]
+# One result line with colored counters; Robocopy's own output only for failures
+def report(printer: Printer, result: TaskResult) -> None:
+    kind = result.task.kind
+    code = result.run.return_code
+    if result.failed:
+        printer.line("❌", f"{kind} · exit code {code} · {result.seconds:.1f}s", RED)
+        for line in result.run.lines:
+            printer.line("📄", line)
+        return
+    parts = [kind, *_counters(printer, kind, result.run.stats), f"{result.seconds:.1f}s"]
+    if result.run.stats is None:
+        parts.insert(1, f"exit code {code}")
+    printer.line("⚠️" if code & MISMATCH_EXIT_CODE else "✅", " · ".join(parts))
 
 
-# Options of a task: its own, or the kind defaults plus the common options
-def task_options(task: FileTask, common_options: tuple[str, ...] | None) -> tuple[str, ...]:
-    options = task.options or (*KIND_OPTIONS[task.kind], *(common_options or COMMON_OPTIONS))
-    if task.kind != "sync":
-        return options
-    # Sync never deletes and keeps the newer file
-    kept = tuple(option for option in options if option.upper() not in SYNC_INCOMPATIBLE_OPTIONS)
-    present = {option.upper() for option in kept}
-    return (*(option for option in ("/E", "/XO") if option not in present), *kept)
+# Counters colored by meaning: news in color, the rest dim
+def _counters(printer: Printer, kind: str, stats: Stats | None) -> list[str]:
+    if stats is None:
+        return []
+    # Extras of a mirror are the files it removed
+    extras_label = "removed" if kind == "mirror" else "extra"
+    counters = [
+        _paint(printer, f"{stats.files} files", CYAN),
+        _paint(printer, f"{stats.copied} copied", GREEN if stats.copied else DIM),
+        _paint(printer, f"{stats.skipped} unchanged", DIM),
+    ]
+    if stats.extras:
+        counters.append(_paint(printer, f"{stats.extras} {extras_label}", YELLOW))
+    if stats.mismatched:
+        counters.append(_paint(printer, f"{stats.mismatched} mismatched", YELLOW))
+    if stats.failed:
+        counters.append(_paint(printer, f"{stats.failed} failed", RED))
+    return counters
+
+
+# Colored segment inside a line; the printer colors whole lines only
+def _paint(printer: Printer, text: str, color: str) -> str:
+    return f"\033[{color}m{text}\033[0m" if printer.color else text
+
+
+def _announce(printer: Printer, task: FileTask) -> None:
+    printer.line("📦", f"{task.kind} · {task.source} → {task.target}")
 
 
 # Create the sync roots and reject folders that contain each other
@@ -103,44 +120,6 @@ def prepare_sync_folders(source: str, target: str) -> None:
             raise FilesError(f"sync {label} is not a folder: {path}")
     source_path.mkdir(parents=True, exist_ok=True)
     target_path.mkdir(parents=True, exist_ok=True)
-
-
-# Run Robocopy once and stream its output; sync runs a second pass in reverse
-def invoke_robocopy(
-    printer: Printer, source: str, target: str, options: tuple[str, ...], *, overwrite: bool = True
-) -> int:
-    command = build_robocopy_command(source, target, options, overwrite=overwrite)
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="oem",
-        errors="replace",
-    )
-    try:
-        for line in process.stdout or ():
-            # Blank lines and separator rules carry no information
-            if line.strip(" -\t\r\n"):
-                printer.line("📄", line.rstrip())
-        return process.wait()
-    finally:
-        # Stop Robocopy when the run is interrupted
-        if process.poll() is None:
-            process.terminate()
-            process.wait()
-
-
-# One Robocopy call; sync runs forward then reverse
-def _run_task(printer: Printer, task: FileTask, common_options: tuple[str, ...] | None) -> int:
-    options = task_options(task, common_options)
-    if task.kind != "sync":
-        return invoke_robocopy(printer, task.source, task.target, options, overwrite=task.overwrite)
-    forward = invoke_robocopy(printer, task.source, task.target, options)
-    if forward >= FAILURE_EXIT_CODE:
-        return forward
-    reverse = invoke_robocopy(printer, task.target, task.source, options)
-    return reverse if reverse >= FAILURE_EXIT_CODE else forward | reverse
 
 
 # Every UNC path needs a configured mapping of its share
