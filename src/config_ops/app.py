@@ -11,7 +11,6 @@ from .configfile import PROJECT_NAME
 from .dates import run_date_set
 from .files import FilesError, run_file_set
 from .output import YELLOW, Printer
-from .peripherals import PeripheralsError, run_peripherals
 from .selection import choose
 from .smb import SmbError, connect
 from .ssh import SshError, run_ssh_set
@@ -25,7 +24,6 @@ Usage:
   {PROJECT_NAME} archive <set>
   {PROJECT_NAME} dates <set>
   {PROJECT_NAME} ssh <set>
-  {PROJECT_NAME} peripherals [device ...] [on|off|toggle|suspend|resume]
   {PROJECT_NAME} --help | -h | help
 
 Configuration:
@@ -37,14 +35,13 @@ Configuration:
 
 Behavior:
   Without arguments on a terminal, shows a menu of all configured tasks.
-  When output is redirected, lists the configured sets and devices instead.
+  When output is redirected, lists the configured sets instead.
   files, archive, dates, and ssh show a set menu on a terminal when no set is given.
   smb connects all configured shares.
   files runs Robocopy mirror, copy, move, and sync tasks of one set.
   archive moves media into YYYY/MM/DD folders by creation date.
   dates sets file times from names or metadata, or writes metadata from file times.
   ssh runs one command over ssh without prompting.
-  peripherals triggers device URLs; toggle is the default command.
   Sets with "smb: true" connect the shares first.
 
 Exit codes:
@@ -54,13 +51,13 @@ Exit codes:
 """
 
 # Errors of the functional areas that end a command with exit code 1
-DOMAIN_ERRORS = (SmbError, FilesError, SshError, PeripheralsError, OSError)
+DOMAIN_ERRORS = (SmbError, FilesError, SshError, OSError)
 
 # This app has no per-run options
 OPTIONS: Mapping[str, bool] = {}
 
 
-# Task menu on a terminal, otherwise an overview of the configured sets and devices
+# Task menu on a terminal, otherwise an overview of the configured sets
 def execute(printer: Printer, config: Config, options: Mapping[str, str]) -> int:
     tasks = _tasks(config)
     if not tasks or not _interactive(printer):
@@ -88,8 +85,6 @@ def _tasks(config: Config) -> list[tuple[str, str, list[str]]]:
         ("ssh", config.ssh),
     ):
         tasks += [(tool, name, [name]) for name in sets]
-    if config.peripherals is not None:
-        tasks.append(("peripherals", "toggle all devices", []))
     return tasks
 
 
@@ -105,7 +100,7 @@ def _interactive(printer: Printer) -> bool:
     return sys.stdin.isatty() and printer.stream.isatty()
 
 
-# Overview of the configured sets and devices
+# Overview of the configured sets
 def _overview(printer: Printer, config: Config) -> int:
     overview = (
         ("🔌", "smb", [share.share for share in config.smb.mappings] if config.smb else []),
@@ -113,7 +108,6 @@ def _overview(printer: Printer, config: Config) -> int:
         ("🗃️", "archive", list(config.archive)),
         ("🕒", "dates", list(config.dates)),
         ("🔐", "ssh", list(config.ssh)),
-        ("💡", "peripherals", list(config.peripherals.devices) if config.peripherals else []),
     )
     shown = [(icon, name, items) for icon, name, items in overview if items]
     if not shown:
@@ -130,16 +124,6 @@ def _smb(printer: Printer, config: Config, arguments: CommandLine) -> int:
     if config.smb is None:
         return printer.fail("Configuration", "smb section is missing")
     return _guarded(printer, "SMB", lambda: _connect(printer, config))
-
-
-# Trigger devices from the peripherals section
-def _peripherals(printer: Printer, config: Config, arguments: CommandLine) -> int:
-    if config.peripherals is None:
-        return printer.fail("Configuration", "peripherals section is missing")
-    settings = config.peripherals
-    return _guarded(
-        printer, "Peripherals", lambda: run_peripherals(printer, settings, arguments.positionals)
-    )
 
 
 # Command that takes the name of one configured set
@@ -222,5 +206,4 @@ COMMANDS: Mapping[str, Callable[[Printer, Config, CommandLine], int]] = {
     "archive": _set_command("archive", "Archive", lambda config: config.archive, _run_archive),
     "dates": _set_command("dates", "Dates", lambda config: config.dates, _run_dates),
     "ssh": _set_command("ssh", "SSH", lambda config: config.ssh, _run_ssh),
-    "peripherals": _peripherals,
 }

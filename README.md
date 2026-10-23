@@ -1,6 +1,6 @@
 # ⚙️ config_ops
 
-Configuration-driven Windows automation in a single binary: SMB shares, Robocopy sets, media archiving, file dates, SSH commands, and URL-controlled devices. Every task is a named set in one strictly validated `config.yml`, so recurring jobs run the same way every time.
+Configuration-driven Windows automation in a single binary: SMB shares, Robocopy sets, media archiving, file dates, and SSH commands. Every task is a named set in one strictly validated `config.yml`, so recurring jobs run the same way every time.
 
 ## ✨ Features
 
@@ -9,7 +9,6 @@ Configuration-driven Windows automation in a single binary: SMB shares, Robocopy
 - 🗃️ **Archive**: Moves media recursively into `YYYY/MM/DD` folders by creation date.
 - 🕒 **Dates**: Sets Windows file times from filenames, folder names, or EXIF/QuickTime metadata, or writes metadata from file times.
 - 🔐 **SSH**: Runs a named command over `ssh` without ever prompting, with a timeout.
-- 💡 **Peripherals**: Triggers device URLs (`on`, `off`, `toggle`, `suspend`, `resume`) and keeps their state in the registry.
 - 🛡️ **Strict config**: Unknown keys, wrong types, and `CHANGE_ME` placeholders are rejected with a dotted path.
 - 📊 **Robocopy view**: A progress bar for the tasks of a set and one colored result line per task (copied, unchanged, removed, failed), with Robocopy's own output only on failures.
 - 🎯 **Menu**: Starting without arguments (e.g. by double-click) shows an arrow-key menu of all tasks; `files`, `archive`, `dates`, and `ssh` offer a set menu when no set is given.
@@ -17,7 +16,7 @@ Configuration-driven Windows automation in a single binary: SMB shares, Robocopy
 
 ## 📦 Install
 
-Requires Windows, [uv](https://docs.astral.sh/uv/), and the system tools `robocopy`, `net`, `curl.exe`, and OpenSSH `ssh` (plus `scp` to deploy remotely).
+Requires Windows, [uv](https://docs.astral.sh/uv/), and the system tools `robocopy`, `net`, and OpenSSH `ssh` (plus `scp` to deploy remotely).
 
 ```powershell
 git clone <repository-url> config_ops
@@ -32,7 +31,6 @@ uv sync
 - **Archive**: Replaces an existing file at the destination; the target must not be inside the source.
 - **Dates**: `file` reads the filename (source folder only), `folder` the containing folder name, `metadata` the embedded EXIF/QuickTime time, and `metadata_reverse` writes the modification time into the metadata. All but `file` scan recursively.
 - **SMB password**: Read from the file named by `smb.password_file`. A bare file name is looked up beside the executable, an absolute or `~` path is used as given. Without the key, `~/.config/.smbcredentials` is used. The file holds the plain password in UTF-8, or a credentials file with `username=` and `password=` lines (other lines are ignored). A `username=` line wins over `smb.user`, so `smb.user` can be left out.
-- **Peripherals**: Words select devices and one command, e.g. `led off`; `toggle` is the default.
 
 ## ⚙️ Configuration
 
@@ -45,7 +43,6 @@ uv sync
 | `archive.<set>` | `smb`, `extensions`, `tasks` (`source`, `target`) |
 | `dates.<set>` | `smb`, `mode`, `source_folder`, `extensions`, `patterns`, `target_folder`, `change_files_in_place`, `overwrite`, `hour_adjustment` |
 | `ssh.<set>` | `user`, `host`, `port`, `timeout_seconds`, `command` |
-| `peripherals` | `registry_path`, `devices.<name>` (`on`, `off`) |
 
 All sections are optional; see [config.example.yml](config.example.yml) for a complete file.
 
@@ -59,8 +56,6 @@ config_ops files backup             # run the Robocopy tasks of a set
 config_ops archive photos           # archive media by creation date
 config_ops dates screenshots        # set file dates from names or metadata
 config_ops ssh remote_backup        # run an SSH command
-config_ops peripherals led off      # switch one device off
-config_ops peripherals              # toggle all devices
 config_ops --help
 ```
 

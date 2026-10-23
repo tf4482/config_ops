@@ -54,11 +54,3 @@ ssh:
     port: 22
     timeout_seconds: 300
     command: "ls"
-
-# URL-controlled devices: config_ops peripherals [device ...] [command]
-peripherals:
-  registry_path: 'Software\config_ops'
-  devices:
-    led:
-      "on": "https://device.example/led/on"
-      "off": "https://device.example/led/off"

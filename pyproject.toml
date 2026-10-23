@@ -1,7 +1,7 @@
 [project]
 name = "config_ops"
 version = "0.1.0"
-description = "Configuration-driven Windows automation: SMB, Robocopy, media archiving, file dates, SSH, and peripherals."
+description = "Configuration-driven Windows automation: SMB, Robocopy, media archiving, file dates, and SSH."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"

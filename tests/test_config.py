@@ -43,7 +43,6 @@ def test_valid_document_is_parsed() -> None:
     assert config.smb is not None and config.smb.mappings[1].drive == "R:"
     assert config.files["backup"].tasks[1].overwrite is False
     assert config.dates["screenshots"].change_files_in_place is True
-    assert config.peripherals is not None and set(config.peripherals.devices) == {"led"}
 
 
 def empty_password_file(document: dict[str, Any]) -> None:

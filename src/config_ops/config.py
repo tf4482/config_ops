@@ -65,14 +65,6 @@ ssh:
     port: 22
     timeout_seconds: 300
     command: "ls"
-
-# URL-controlled devices: config_ops peripherals [device ...] [command]
-peripherals:
-  registry_path: 'Software\config_ops'
-  devices:
-    led:
-      "on": "https://device.example/led/on"
-      "off": "https://device.example/led/off"
 """
 
 FileKind = Literal["mirror", "copy", "move", "sync"]
@@ -150,19 +142,6 @@ class SshSet:
     command: str
 
 
-@dataclass(frozen=True, slots=True)
-class Device:
-    name: str
-    on_url: str
-    off_url: str
-
-
-@dataclass(frozen=True, slots=True)
-class PeripheralSettings:
-    registry_path: str
-    devices: Mapping[str, Device]
-
-
 # Validated configuration; every section is optional
 @dataclass(frozen=True, slots=True)
 class Config:
@@ -171,20 +150,18 @@ class Config:
     archive: Mapping[str, ArchiveSet]
     dates: Mapping[str, DateSet]
     ssh: Mapping[str, SshSet]
-    peripherals: PeripheralSettings | None
 
 
 # Strict validation of the decoded YAML document
 def parse_config(document: Any) -> Config:
     root = mapping(document, "configuration")
-    _keys(root, set(), {"smb", "files", "archive", "dates", "ssh", "peripherals"}, "configuration")
+    _keys(root, set(), {"smb", "files", "archive", "dates", "ssh"}, "configuration")
     config = Config(
         smb=_parse_smb(root["smb"]) if "smb" in root else None,
         files=_sets(root.get("files"), "files", _parse_file_set),
         archive=_sets(root.get("archive"), "archive", _parse_archive_set),
         dates=_sets(root.get("dates"), "dates", _parse_date_set),
         ssh=_sets(root.get("ssh"), "ssh", _parse_ssh_set),
-        peripherals=_parse_peripherals(root["peripherals"]) if "peripherals" in root else None,
     )
     if config.smb is None:
         for section, sets in (
@@ -394,21 +371,3 @@ def _parse_ssh_set(values: Mapping[str, Any], location: str) -> SshSet:
         timeout_seconds=positive_seconds(values, "timeout_seconds", location),
         command=text(values, "command", location),
     )
-
-
-# Validate the peripherals section
-def _parse_peripherals(value: Any) -> PeripheralSettings:
-    peripherals = mapping(value, "peripherals")
-    _keys(peripherals, {"registry_path", "devices"}, set(), "peripherals")
-    entries = mapping(peripherals["devices"], "peripherals.devices")
-    devices = {}
-    for raw_name, entry in entries.items():
-        location = f"peripherals.devices.{raw_name}"
-        item = mapping(entry, location)
-        _keys(item, {"on", "off"}, set(), location)
-        # Device names are matched case-insensitively on the command line
-        name = str(raw_name).strip().lower()
-        devices[name] = Device(name, text(item, "on", location), text(item, "off", location))
-    if not devices:
-        raise ConfigError("peripherals.devices must define at least one device")
-    return PeripheralSettings(text(peripherals, "registry_path", "peripherals"), devices)
