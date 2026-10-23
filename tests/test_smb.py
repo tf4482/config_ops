@@ -115,3 +115,19 @@ def test_deviceless_failure_reports_the_message_not_a_drive_conflict(
     lines = stream.getvalue().splitlines()
     assert "exit code 2 · System error 53 occurred." in lines[0]
     assert "drive in use by another share" in lines[1]
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["username=user\npassword=s3cret=1 \n", "domain=WORKGROUP\r\nPassword=s3cret=1 \r\n"],
+)
+def test_password_is_taken_from_a_credentials_file(tmp_path: Path, content: str) -> None:
+    (tmp_path / "creds").write_bytes(content.encode())
+
+    assert smb.read_password("creds", tmp_path) == "s3cret=1 "
+
+
+def test_plain_password_with_an_equals_sign_stays_intact(tmp_path: Path) -> None:
+    (tmp_path / "plain").write_text("abc=def\n", encoding="utf-8")
+
+    assert smb.read_password("plain", tmp_path) == "abc=def"

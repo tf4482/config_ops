@@ -42,14 +42,18 @@ def connect(printer: Printer, smb: SmbSettings, directory: Path | None = None) -
             printer.line("⚠️", f"{label} · {_reason(mapping, result)}", YELLOW)
             failed.append(label)
     if failed:
-        raise SmbError(f"{len(failed)} connection(s) failed: {', '.join(failed)}")
+        source = password_path(smb.password_file, directory)
+        raise SmbError(
+            f"{len(failed)} connection(s) failed: {', '.join(failed)}; "
+            f"check smb.user and the password file {source}"
+        )
 
 
-# Password from the configured file; trailing line breaks are dropped
+# Password from the configured file: plain, or the password= line of a credentials file
 def read_password(password_file: str | None, directory: Path | None = None) -> str:
     path = password_path(password_file, directory)
     try:
-        password = path.read_text(encoding="utf-8-sig").rstrip("\r\n")
+        password = _password_from(path.read_text(encoding="utf-8-sig"))
     except UnicodeError:
         # The message of a decoding error could echo file content
         raise SmbError(f"password file {path} is not valid UTF-8") from None
@@ -138,6 +142,15 @@ def unc_path_covered(path: str, mappings: Sequence[SmbMapping]) -> bool:
         if (mapping_root := unc_share_root(mapping.share)) is not None
     }
     return _normalize(root) in covered
+
+
+# The password= line of a key=value credentials file, else the content without line breaks
+def _password_from(content: str) -> str:
+    for line in content.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip().lower() == "password":
+            return value
+    return content.rstrip("\r\n")
 
 
 # Why a connection failed; the message of "net use" says more than its exit code
