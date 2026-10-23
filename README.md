@@ -15,19 +15,17 @@ Configuration-driven Windows utilities for recurring file, network, media, SSH, 
 ## Prerequisites 📋
 
 - Windows with Python 3.13 or newer
-- [uv](https://docs.astral.sh/uv/) and Git with submodule support
+- [uv](https://docs.astral.sh/uv/) and Git
 - `robocopy`, `net use`, `curl.exe`, and OpenSSH `ssh` (plus `scp` for remote deployment), depending on the tool
 
 ## Installation 🚀
 
-1. Clone the repository with its submodule:
+1. Clone the repository:
 
    ```powershell
-   git clone --recurse-submodules <repository-url> config_ops
+   git clone <repository-url> config_ops
    cd config_ops
    ```
-
-   For an existing clone, run `git submodule update --init --recursive`.
 
 2. Install the dependencies:
 
@@ -143,9 +141,8 @@ Each run prints start, progress, and a summary; any failure ends with a non-zero
 
 | Path | Purpose |
 | --- | --- |
-| `file_operations.py`, `archive_media.py`, `adjust_file_creation_date.py`, `ssh_tasks.py` | Set-based task scripts |
+| `file_operations.py`, `archive_media.py`, `adjust_file_creation_date.py`, `ssh_tasks.py` | Set-based task scripts (each is self-contained) |
 | `connect_smb.pyw`, `peripherals.pyw` | Windowless helper scripts |
-| `winutils_python/` | Submodule with shared config, menu, SMB, Robocopy, and output code |
 | `deploy.py` | Build and copy executables (local only, not tracked) |
 | `tests/` | Automated tests |
 | `config.yaml` | Local configuration (not tracked) |
