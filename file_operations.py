@@ -63,8 +63,18 @@ def ensure_section(config: dict[str, Any]) -> None:
     config_sets.section_sets(config, CONFIG_SECTION)
 
 
-def validate_operation_set(operation_set: dict[str, Any], set_name: str) -> None:
+def validate_operation_set(config: dict[str, Any], operation_set: dict[str, Any], set_name: str) -> None:
     """Validate operation groups and required task values before execution."""
+
+    smb_enabled = connect_smb.optional_smb_enabled(
+        operation_set,
+        error_label=f"File operation set '{set_name}' value 'smb'",
+    )
+    mappings = (
+        connect_smb.mappings_from_config(connect_smb.get_table(config, connect_smb.SMB_CONFIG_SECTION))
+        if smb_enabled
+        else ()
+    )
 
     for operation_type in file_ops.OPERATION_TYPES:
         operation_group = operation_set.get(operation_type, [])
@@ -88,6 +98,14 @@ def validate_operation_set(operation_set: dict[str, Any], set_name: str) -> None
                 label=config_sets.config_key(CONFIG_SECTION, set_name, f"{operation_type}.overwrite"),
                 default=default_overwrite,
             )
+            for path_key in ("source", "target"):
+                path = str(task[path_key])
+                if not connect_smb.unc_path_covered(path, mappings):
+                    root = connect_smb.unc_share_root(path)
+                    raise ValueError(
+                        f"File operation set '{set_name}' {operation_type} {path_key} uses UNC share "
+                        f"'{root}' without a matching SMB mapping"
+                    )
 
 
 def prepare_sync_directories(operation_set: dict[str, Any]) -> None:
@@ -127,7 +145,7 @@ def main() -> None:
 
     visual.print_start(f"Starting file operations: {set_name}")
     operation_set = operation_set_config(config, set_name)
-    validate_operation_set(operation_set, set_name)
+    validate_operation_set(config, operation_set, set_name)
     connect_smb.connect_from_config(
         connect_smb.scoped_config_for_optional_smb(
             config,

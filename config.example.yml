@@ -1,0 +1,13 @@
+database:
+  # Primary PostgreSQL connection
+  host: "127.0.0.1"
+  port: 5432
+  name: "monitoring"
+  user: "monitoring"
+  password: "CHANGE_ME"
+
+settings:
+  ping_concurrency: 16
+  ping_timeout_seconds: 1
+  ssh_concurrency: 8
+  ssh_timeout_seconds: 2
