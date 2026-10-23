@@ -46,6 +46,13 @@ SYNC_INCOMPATIBLE_OPTIONS = {"/MIR", "/PURGE", "/MOV", "/MOVE", "/XC", "/XN", "/
 COUNTER_ROW = re.compile(r"^\s*[^\d\s][^:]*:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$")
 
 
+# An error entry: a timestamp, ERROR (or its translation), and a code like "5 (0x00000005)"
+ERROR_ROW = re.compile(r"^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d \S+ \d+ \(0x[0-9A-Fa-f]+\)")
+# Lines shown at most when a run failed, and the fallback when no error entry exists
+MAX_ERROR_LINES = 20
+FALLBACK_TAIL = 10
+
+
 # File counters of one run: total, copied, skipped, mismatched, failed, extras
 @dataclass(frozen=True, slots=True)
 class Stats:
@@ -138,6 +145,20 @@ def invoke_robocopy(
         if process.poll() is None:
             process.terminate()
             process.wait()
+
+
+# The error entries with their message line; the last lines when there are none
+def error_lines(lines: tuple[str, ...]) -> list[str]:
+    selected: list[str] = []
+    for index, line in enumerate(lines):
+        if not ERROR_ROW.match(line):
+            continue
+        selected.append(line)
+        following = lines[index + 1] if index + 1 < len(lines) else ""
+        # The message of an error follows on its own, unindented line
+        if following and not following[0].isspace() and not ERROR_ROW.match(following):
+            selected.append(following)
+    return selected or list(lines[-FALLBACK_TAIL:])
 
 
 # Dirs and Files rows come first in the summary table, whatever the language

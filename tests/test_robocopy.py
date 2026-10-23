@@ -79,3 +79,17 @@ def test_sync_passes_are_combined_into_one_picture() -> None:
     reverse = robocopy.Stats(files=4, copied=1, skipped=3, mismatched=0, failed=0, extras=0)
 
     assert robocopy._sync_stats(forward, reverse) == robocopy.Stats(4, 2, 2, 0, 0, 0)
+
+
+def test_failures_show_only_the_error_entries_and_their_messages() -> None:
+    lines = (
+        r"                \\server.example\x\file1.txt",
+        r"2026/10/23 14:59:55 FEHLER 5 (0x00000005) Verzeichnis wird kopiert C:\x\temp\ ",
+        "Zugriff verweigert",
+        r"                \\server.example\x\file2.txt",
+        r"2026/10/23 14:59:56 ERROR 32 (0x00000020) Copying File C:\x\a.txt",
+        "The process cannot access the file",
+    )
+
+    assert robocopy.error_lines(lines) == [lines[1], lines[2], lines[4], lines[5]]
+    assert robocopy.error_lines(("Invalid Parameter #3",)) == ["Invalid Parameter #3"]

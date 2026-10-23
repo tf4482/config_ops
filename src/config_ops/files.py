@@ -8,7 +8,7 @@ from pathlib import Path
 from .config import FileSet, FileTask, SmbSettings
 from .output import CYAN, GREEN, RED, YELLOW, Printer
 from .progress import Progress
-from .robocopy import FAILURE_EXIT_CODE, Run, Stats, run_task
+from .robocopy import FAILURE_EXIT_CODE, MAX_ERROR_LINES, Run, Stats, error_lines, run_task
 from .smb import unc_path_covered, unc_share_root
 
 # Dim text for counters that carry no news
@@ -66,9 +66,13 @@ def report(printer: Printer, result: TaskResult) -> None:
     kind = result.task.kind
     code = result.run.return_code
     if result.failed:
-        printer.line("❌", f"{kind} · exit code {code} · {result.seconds:.1f}s", RED)
-        for line in result.run.lines:
-            printer.line("📄", line)
+        parts = [kind, f"exit code {code}", *_counters(printer, kind, result.run.stats)]
+        printer.line("❌", " · ".join([*parts, f"{result.seconds:.1f}s"]), RED)
+        details = error_lines(result.run.lines)
+        for line in details[:MAX_ERROR_LINES]:
+            printer.line("📄", line.strip())
+        if len(details) > MAX_ERROR_LINES:
+            printer.line("📄", f"… {len(details) - MAX_ERROR_LINES} more line(s)")
         return
     parts = [kind, *_counters(printer, kind, result.run.stats), f"{result.seconds:.1f}s"]
     if result.run.stats is None:
