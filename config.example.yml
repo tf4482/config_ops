@@ -1,13 +1,62 @@
-database:
-  # Primary PostgreSQL connection
-  host: "127.0.0.1"
-  port: 5432
-  name: "monitoring"
-  user: "monitoring"
+# SMB shares for sets with "smb: true"; drop the section when unused
+smb:
+  user: 'DOMAIN\user'
   password: "CHANGE_ME"
+  mappings:
+    - share: '\\server\main'
+    - share: '\\server\backup'
+      drive: "R:"
 
-settings:
-  ping_concurrency: 16
-  ping_timeout_seconds: 1
-  ssh_concurrency: 8
-  ssh_timeout_seconds: 2
+# Robocopy sets: config_ops files <set>
+files:
+  backup:
+    smb: false
+    # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC"]
+    tasks:
+      - type: mirror          # mirror | copy | move | sync
+        source: 'C:\data'
+        target: 'D:\backup\data'
+      - type: copy
+        source: 'C:\documents'
+        target: 'D:\backup\documents'
+        overwrite: false      # optional, default true
+
+# Media archive sets: config_ops archive <set>
+archive:
+  photos:
+    smb: false
+    extensions: [".jpg", ".png", ".mp4"]
+    tasks:
+      - source: 'C:\import'
+        target: 'D:\photos'
+
+# File date sets: config_ops dates <set>
+dates:
+  screenshots:
+    smb: false
+    mode: file                # file | folder | metadata | metadata_reverse
+    source_folder: 'C:\screenshots'
+    extensions: [".jpg", ".png"]
+    patterns:                 # needed for file and folder mode
+      - '^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})'
+    # target_folder: 'C:\screenshots-adjusted'
+    # change_files_in_place: true
+    # overwrite: false
+    # hour_adjustment: 0
+
+# SSH command sets: config_ops ssh <set>
+ssh:
+  remote_backup:
+    user: "backup"
+    host: "192.0.2.10"
+    port: 22
+    timeout_seconds: 300
+    command: "ls"
+
+# URL-controlled devices: config_ops peripherals [device ...] [command]
+peripherals:
+  registry_path: 'Software\config_ops'
+  devices:
+    led:
+      "on": "https://device.example/led/on"
+      "off": "https://device.example/led/off"
