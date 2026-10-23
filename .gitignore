@@ -66,6 +66,15 @@ vendor/
 venv/
 wheels/
 
+.claude/
+.codex/
+.agents/
+.gemini/
+.config/
+.cursor/
+.copilot/
+.agents/
+
 .env
 .env.*
 !.env.example
@@ -120,4 +129,6 @@ deploy*
 python-project-reviser.sh
 
 .prettierignore
-agents.md
+AGENTS.md
+build.spec
+CLAUDE.md
