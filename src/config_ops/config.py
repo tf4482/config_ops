@@ -11,9 +11,9 @@ from .configfile import ConfigError, mapping, port, positive_seconds, text
 # Must match config.example.yml
 DEFAULT_CONFIG = r"""# SMB shares for sets with "smb: true"; drop the section when unused
 smb:
-  user: "CHANGE_ME"           # e.g. DOMAIN\user
+  user: "CHANGE_ME"           # e.g. DOMAIN\user; a username= line in the password file wins
   # Password file: a bare file name is looked up beside the executable, a path is used as given.
-  # Default: ~/.config/.smbcredentials
+  # Plain password, or lines username=... and password=... Default: ~/.config/.smbcredentials
   # password_file: "smb.pass"
   mappings:
     - share: '\\server\main'
@@ -93,7 +93,7 @@ class SmbMapping:
 # Shared SMB account and shares
 @dataclass(frozen=True, slots=True)
 class SmbSettings:
-    user: str
+    user: str | None
     password_file: str | None
     mappings: tuple[SmbMapping, ...]
 
@@ -266,7 +266,7 @@ def _extensions(values: Mapping[str, Any], location: str) -> frozenset[str]:
 # Validate the smb section
 def _parse_smb(value: Any) -> SmbSettings:
     smb = mapping(value, "smb")
-    _keys(smb, {"user", "mappings"}, {"password_file"}, "smb")
+    _keys(smb, {"mappings"}, {"user", "password_file"}, "smb")
     entries = smb["mappings"]
     if not isinstance(entries, list) or not entries:
         raise ConfigError("smb.mappings must be a non-empty list")
@@ -278,7 +278,7 @@ def _parse_smb(value: Any) -> SmbSettings:
         drive = text(item, "drive", location) if "drive" in item else None
         mappings.append(SmbMapping(share=text(item, "share", location), drive=drive))
     return SmbSettings(
-        user=text(smb, "user", "smb"),
+        user=text(smb, "user", "smb") if "user" in smb else None,
         password_file=text(smb, "password_file", "smb") if "password_file" in smb else None,
         mappings=tuple(mappings),
     )

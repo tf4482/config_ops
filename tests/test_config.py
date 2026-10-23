@@ -28,6 +28,15 @@ def test_example_file_matches_embedded_template() -> None:
     assert example.read_text(encoding="utf-8") == DEFAULT_CONFIG
 
 
+def test_smb_user_is_optional() -> None:
+    document = config_document()
+    del document["smb"]["user"]
+
+    config = parse_config(document)
+
+    assert config.smb is not None and config.smb.user is None
+
+
 def test_valid_document_is_parsed() -> None:
     config = parse_config(config_document())
 

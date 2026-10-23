@@ -52,7 +52,7 @@ def test_unc_coverage_requires_the_same_server_identity() -> None:
 def test_password_is_read_from_the_file_beside_the_executable(tmp_path: Path) -> None:
     (tmp_path / "smb.pass").write_bytes(b"\xef\xbb\xbfs3cret pass\r\n")
 
-    assert smb.read_password("smb.pass", tmp_path) == "s3cret pass"
+    assert smb.read_credentials("smb.pass", tmp_path).password == "s3cret pass"
 
 
 @pytest.mark.parametrize("content", [b"", b"\r\n", b"\xff\xfesecret"])
@@ -62,14 +62,14 @@ def test_unusable_password_files_are_rejected_without_content(
     (tmp_path / "smb.pass").write_bytes(content)
 
     with pytest.raises(smb.SmbError) as caught:
-        smb.read_password("smb.pass", tmp_path)
+        smb.read_credentials("smb.pass", tmp_path)
 
     assert "secret" not in str(caught.value)
 
 
 def test_missing_password_file_is_reported(tmp_path: Path) -> None:
     with pytest.raises(smb.SmbError, match="cannot read password file"):
-        smb.read_password("missing.pass", tmp_path)
+        smb.read_credentials("missing.pass", tmp_path)
 
 
 def test_password_file_defaults_to_the_user_config_folder(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,7 +105,7 @@ def test_deviceless_failure_reports_the_message_not_a_drive_conflict(
 ) -> None:
     failure = smb.NetUseResult(2, "System error 53 occurred.")
     monkeypatch.setattr(smb, "run_net_use", lambda *_args, **_kwargs: failure)
-    monkeypatch.setattr(smb, "read_password", lambda *_args: "secret")
+    monkeypatch.setattr(smb, "read_credentials", lambda *_args: smb.Credentials(None, "secret"))
     stream = io.StringIO()
     settings = SmbSettings("user", None, (SmbMapping(SHARE, None), SmbMapping(SHARE, "R:")))
 
@@ -118,16 +118,53 @@ def test_deviceless_failure_reports_the_message_not_a_drive_conflict(
 
 
 @pytest.mark.parametrize(
-    "content",
-    ["username=user\npassword=s3cret=1 \n", "domain=WORKGROUP\r\nPassword=s3cret=1 \r\n"],
+    ("content", "expected"),
+    [
+        ("username=user\npassword=s3cret=1 \n", smb.Credentials("user", "s3cret=1 ")),
+        ("domain=WORKGROUP\r\nPassword=s3cret=1 \r\n", smb.Credentials(None, "s3cret=1 ")),
+    ],
 )
-def test_password_is_taken_from_a_credentials_file(tmp_path: Path, content: str) -> None:
+def test_credentials_are_taken_from_a_credentials_file(
+    tmp_path: Path, content: str, expected: smb.Credentials
+) -> None:
     (tmp_path / "creds").write_bytes(content.encode())
 
-    assert smb.read_password("creds", tmp_path) == "s3cret=1 "
+    assert smb.read_credentials("creds", tmp_path) == expected
 
 
 def test_plain_password_with_an_equals_sign_stays_intact(tmp_path: Path) -> None:
     (tmp_path / "plain").write_text("abc=def\n", encoding="utf-8")
 
-    assert smb.read_password("plain", tmp_path) == "abc=def"
+    assert smb.read_credentials("plain", tmp_path) == smb.Credentials(None, "abc=def")
+
+
+def connect_with(
+    monkeypatch: pytest.MonkeyPatch, file_user: str | None, config_user: str | None
+) -> list[str]:
+    users: list[str] = []
+
+    def fake_run(_drive: str | None, _share: str, _password: str, *, user: str) -> smb.NetUseResult:
+        users.append(user)
+        return smb.NetUseResult(0)
+
+    monkeypatch.setattr(smb, "run_net_use", fake_run)
+    monkeypatch.setattr(
+        smb, "read_credentials", lambda *_args: smb.Credentials(file_user, "secret")
+    )
+    settings = SmbSettings(config_user, None, (SmbMapping(SHARE, None),))
+    smb.connect(Printer(io.StringIO(), color=False), settings)
+    return users
+
+
+def test_user_of_the_credentials_file_wins_over_the_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert connect_with(monkeypatch, "file-user", "config-user") == ["file-user"]
+    assert connect_with(monkeypatch, None, "config-user") == ["config-user"]
+
+
+def test_connect_needs_a_user_from_the_file_or_the_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(smb.SmbError, match="no user"):
+        connect_with(monkeypatch, None, None)

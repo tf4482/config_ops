@@ -30,7 +30,7 @@ uv sync
 - **Files**: `mirror` can delete extra target content. `sync` keeps the newer file, never purges, and rejects identical or nested folders. UNC paths need a matching `smb.mappings` share. Robocopy exit codes below `8` count as success.
 - **Archive**: Replaces an existing file at the destination; the target must not be inside the source.
 - **Dates**: `file` reads the filename (source folder only), `folder` the containing folder name, `metadata` the embedded EXIF/QuickTime time, and `metadata_reverse` writes the modification time into the metadata. All but `file` scan recursively.
-- **SMB password**: Read from the file named by `smb.password_file`. A bare file name is looked up beside the executable, an absolute or `~` path is used as given. Without the key, `~/.config/.smbcredentials` is used. The file holds the plain password in UTF-8, or a credentials file with a `password=` line (other lines are ignored; `smb.user` still comes from the config).
+- **SMB password**: Read from the file named by `smb.password_file`. A bare file name is looked up beside the executable, an absolute or `~` path is used as given. Without the key, `~/.config/.smbcredentials` is used. The file holds the plain password in UTF-8, or a credentials file with `username=` and `password=` lines (other lines are ignored). A `username=` line wins over `smb.user`, so `smb.user` can be left out.
 - **Peripherals**: Words select devices and one command, e.g. `led off`; `toggle` is the default.
 
 ## ⚙️ Configuration
@@ -39,7 +39,7 @@ uv sync
 
 | Section | Keys |
 | --- | --- |
-| `smb` | `user`, optional `password_file`, `mappings` (`share`, optional `drive`) |
+| `smb` | optional `user`, optional `password_file`, `mappings` (`share`, optional `drive`) |
 | `files.<set>` | `smb`, `common_options`, `tasks` (`type`, `source`, `target`, `overwrite`, `options`) |
 | `archive.<set>` | `smb`, `extensions`, `tasks` (`source`, `target`) |
 | `dates.<set>` | `smb`, `mode`, `source_folder`, `extensions`, `patterns`, `target_folder`, `change_files_in_place`, `overwrite`, `hour_adjustment` |

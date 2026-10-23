@@ -29,13 +29,24 @@ class NetUseResult:
     detail: str = ""
 
 
+# User and password from the credentials file
+@dataclass(frozen=True, slots=True)
+class Credentials:
+    user: str | None
+    password: str
+
+
 # Connect every mapping; raise after all attempts when any failed
 def connect(printer: Printer, smb: SmbSettings, directory: Path | None = None) -> None:
-    password = read_password(smb.password_file, directory)
+    credentials = read_credentials(smb.password_file, directory)
+    # A username in the file wins over smb.user of the configuration
+    user = credentials.user or smb.user
+    if user is None:
+        raise SmbError("no user: set smb.user or a username= line in the password file")
     failed: list[str] = []
     for mapping in smb.mappings:
         label = f"{mapping.drive} → {mapping.share}" if mapping.drive else mapping.share
-        result = run_net_use(mapping.drive, mapping.share, password, user=smb.user)
+        result = run_net_use(mapping.drive, mapping.share, credentials.password, user=user)
         if result.return_code == NET_USE_OK:
             printer.line("✅", f"{label} · connected", GREEN)
         else:
@@ -49,20 +60,20 @@ def connect(printer: Printer, smb: SmbSettings, directory: Path | None = None) -
         )
 
 
-# Password from the configured file: plain, or the password= line of a credentials file
-def read_password(password_file: str | None, directory: Path | None = None) -> str:
+# Credentials from the configured file: a plain password, or username= and password= lines
+def read_credentials(password_file: str | None, directory: Path | None = None) -> Credentials:
     path = password_path(password_file, directory)
     try:
-        password = _password_from(path.read_text(encoding="utf-8-sig"))
+        credentials = _parse_credentials(path.read_text(encoding="utf-8-sig"))
     except UnicodeError:
         # The message of a decoding error could echo file content
         raise SmbError(f"password file {path} is not valid UTF-8") from None
     except OSError as error:
         hint = "" if password_file else " (default file, set smb.password_file to change it)"
         raise SmbError(f"cannot read password file {path}: {error.strerror}{hint}") from None
-    if not password:
+    if not credentials.password:
         raise SmbError(f"password file {path} is empty")
-    return password
+    return credentials
 
 
 # Default file, an absolute or ~ path as given, anything else beside the executable
@@ -144,13 +155,17 @@ def unc_path_covered(path: str, mappings: Sequence[SmbMapping]) -> bool:
     return _normalize(root) in covered
 
 
-# The password= line of a key=value credentials file, else the content without line breaks
-def _password_from(content: str) -> str:
+# username= and password= lines of a credentials file, else the plain password
+def _parse_credentials(content: str) -> Credentials:
+    values: dict[str, str] = {}
     for line in content.splitlines():
         key, separator, value = line.partition("=")
-        if separator and key.strip().lower() == "password":
-            return value
-    return content.rstrip("\r\n")
+        if separator and key.strip().lower() in ("username", "user", "password"):
+            values.setdefault(key.strip().lower(), value)
+    if "password" not in values:
+        return Credentials(None, content.rstrip("\r\n"))
+    user = (values.get("username") or values.get("user") or "").strip()
+    return Credentials(user or None, values["password"])
 
 
 # Why a connection failed; the message of "net use" says more than its exit code
