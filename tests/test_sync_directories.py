@@ -3,7 +3,6 @@
 import pytest
 
 import file_operations
-from winutils_python import file_ops
 
 
 @pytest.mark.parametrize("existing_side", ("source", "target"))
@@ -23,7 +22,7 @@ def test_sync_creates_missing_root_and_copies_unique_file(tmp_path, existing_sid
     )
 
     assert source.is_dir() and target.is_dir()
-    assert file_ops.sync(str(source), str(target)) < file_ops.ROBOCOPY_FAILURE_EXIT_CODE
+    assert file_operations.sync(str(source), str(target)) < file_operations.ROBOCOPY_FAILURE_EXIT_CODE
     assert (source / "only-here.txt").read_text(encoding="utf-8") == "content"
     assert (target / "only-here.txt").read_text(encoding="utf-8") == "content"
     assert (source / "nested" / "nested-only.txt").read_text(encoding="utf-8") == "nested"

@@ -8,12 +8,291 @@ URLs with ``curl.exe`` without opening terminal windows.
 import subprocess
 import sys
 import winreg
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, TextIO
 
-from winutils_python import config as config_utils
-from winutils_python import config_validation
-from winutils_python import visual
+import yaml
+
+# Shared helpers inlined from winutils_python
+
+RESET = "\033[0m"
+BOLD = "\033[1m"
+GREEN = "\033[92m"
+RED = "\033[91m"
+CYAN = "\033[96m"
+YELLOW = "\033[93m"
+EMOJIS = {
+    "archive": "🖼️",
+    "connect": "🔌",
+    "done": "🎉",
+    "error": "❌",
+    "list": "📋",
+    "move": "📦",
+    "package": "📦",
+    "select": "👉",
+    "start": "🚀",
+    "success": "✅",
+    "warning": "⚠️",
+}
+COLORS = {
+    "error": RED,
+    "info": CYAN,
+    "start": BOLD + CYAN,
+    "success": GREEN,
+    "warning": YELLOW,
+    "done": BOLD + GREEN,
+}
+
+
+def is_terminal(stream: TextIO | None = None) -> bool:
+    """Return whether an output stream is an interactive terminal."""
+
+    output = sys.stdout if stream is None else stream
+    return bool(output and output.isatty())
+
+
+def stream_safe_text(message: str, stream: TextIO) -> str:
+    """Return text representable by the output stream encoding."""
+
+    encoding = stream.encoding or "utf-8"
+    return message.encode(encoding, errors="replace").decode(encoding)
+
+
+def write_text(message: str, stream: TextIO, *, end: str = "\n") -> None:
+    """Write UTF-8 to redirected streams and native text to terminals."""
+
+    buffer = getattr(stream, "buffer", None)
+    if not is_terminal(stream) and buffer is not None:
+        buffer.write(f"{message}{end}".encode("utf-8"))
+        buffer.flush()
+        return
+
+    print(stream_safe_text(message, stream), file=stream, end=end, flush=True)
+
+
+def emoji_for(name: str) -> str:
+    """Return a configured emoji by symbolic name, or the name itself."""
+
+    return EMOJIS.get(name, name)
+
+
+def color_for(name: str) -> str:
+    """Return an ANSI color by symbolic name, or the name itself."""
+
+    return COLORS.get(name, name)
+
+
+def colorize(message: str, color: str = "", *, enabled: bool | None = None) -> str:
+    """Wrap a message in ANSI color codes when color output is enabled."""
+
+    if enabled is None:
+        enabled = is_terminal()
+
+    if not enabled or not color:
+        return message
+
+    return f"{color}{message}{RESET}"
+
+
+def visual_message(
+    message: str,
+    *,
+    emoji: str = "",
+    color: str = "",
+    color_enabled: bool = True,
+) -> str:
+    """Build a colorized message with an optional emoji prefix."""
+
+    text = prefix_emoji(message, emoji)
+    return colorize(text, color_for(color), enabled=color_enabled)
+
+
+def prefix_emoji(message: str, emoji: str = "") -> str:
+    """Prefix a message with an emoji when one is configured."""
+
+    icon = emoji_for(emoji)
+
+    if not icon:
+        return message
+
+    return f"{icon} {message}"
+
+
+def print_visual(
+    message: str,
+    *,
+    emoji: str = "",
+    color: str = "",
+    stream: TextIO | None = None,
+) -> None:
+    """Print a visual status message with terminal-aware color."""
+
+    output = sys.stdout if stream is None else stream
+    if output is None:
+        return
+
+    text = visual_message(message, emoji=emoji, color=color, color_enabled=is_terminal(output))
+    write_text(text, output)
+
+
+def print_warning(message: str) -> None:
+    """Print a warning status message."""
+
+    print_visual(message, emoji="warning", color="warning", stream=sys.stderr)
+
+
+def print_error(message: str) -> None:
+    """Print an error status message."""
+
+    print_visual(message, emoji="error", color="error", stream=sys.stderr)
+
+
+def print_done(message: str) -> None:
+    """Print a completion status message."""
+
+    print_visual(message, emoji="done", color="done")
+
+
+CONFIG_PATH_KEY = "__config_path__"
+
+
+def parse_yaml(config_text: str) -> dict[str, Any]:
+    """Parse YAML text into a dictionary, treating empty content as empty."""
+
+    loaded = yaml.safe_load(config_text)
+    if loaded is None:
+        return {}
+
+    if not isinstance(loaded, dict):
+        raise TypeError("Configuration root must be a table")
+
+    return loaded
+
+
+def get_table(config: dict[str, Any], name: str) -> dict[str, Any]:
+    """Return a top-level table from config or raise for invalid shape."""
+
+    value = config.get(name, {})
+
+    if not isinstance(value, dict):
+        raise TypeError(f"Configuration value '{name}' must be a table")
+
+    return value
+
+
+def app_dir(script_file: str | Path) -> Path:
+    """Return the script directory, or executable directory when frozen."""
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    return Path(script_file).resolve().parent
+
+
+def script_dir(script_file: str | Path) -> Path:
+    """Return the directory used for script-local runtime files."""
+
+    return app_dir(script_file)
+
+
+def config_path(script_file: str | Path, filename: str = "config.yaml") -> Path:
+    """Return the config file path next to a script or frozen executable."""
+
+    return script_dir(script_file) / filename
+
+
+def find_config_path(script_file: str | Path, filename: str = "config.yaml") -> Path:
+    """Return the config path, creating an empty file when missing."""
+
+    path = config_path(script_file, filename)
+
+    if not path.exists():
+        path.write_text("", encoding="utf-8")
+
+    return path
+
+
+def load(script_file: str | Path, filename: str = "config.yaml") -> dict[str, Any]:
+    """Load a YAML config and attach its path under an internal key."""
+
+    path = find_config_path(script_file, filename)
+    loaded_config = parse_yaml(path.read_text(encoding="utf-8"))
+    loaded_config[CONFIG_PATH_KEY] = path
+    return loaded_config
+
+
+def append_section_yaml(config: dict[str, Any], section_yaml: str) -> None:
+    """Append a default YAML section to the loaded config file."""
+
+    path = config.get(CONFIG_PATH_KEY)
+
+    if not isinstance(path, Path):
+        return
+
+    existing = path.read_text(encoding="utf-8").rstrip()
+    separator = "\n\n" if existing else ""
+    path.write_text(existing + separator + section_yaml.strip() + "\n", encoding="utf-8")
+
+
+@dataclass(frozen=True)
+class RequiredKey:
+    """Description of a required config key."""
+
+    key: str
+    label: str | None = None
+    allow_empty: bool = False
+
+
+def required_key(key: str, *, label: str | None = None, allow_empty: bool = False) -> RequiredKey:
+    """Return a required-key descriptor."""
+
+    return RequiredKey(key, label=label, allow_empty=allow_empty)
+
+
+def missing_keys(config: dict[str, Any], required_keys: Iterable[RequiredKey]) -> list[str]:
+    """Return labels for required keys that are missing or empty."""
+
+    missing: list[str] = []
+
+    for required in required_keys:
+        label = required.label or required.key
+        if required.key not in config:
+            missing.append(label)
+            continue
+
+        value = config[required.key]
+        if required.allow_empty:
+            continue
+
+        if value is None or value == "" or value == [] or value == {}:
+            missing.append(label)
+
+    return missing
+
+
+def report_missing_keys(missing: list[str]) -> None:
+    """Print missing config keys to the console."""
+
+    if not missing:
+        return
+
+    print_error("Missing required configuration option(s):")
+    for key in missing:
+        print_error(f"- {key}")
+
+
+def require_keys(config: dict[str, Any], required_keys: Iterable[RequiredKey]) -> None:
+    """Print and fail when required config keys are missing."""
+
+    missing = missing_keys(config, required_keys)
+    report_missing_keys(missing)
+
+    if missing:
+        raise SystemExit(1)
+
+
 
 
 CONFIG_SECTION = "peripherals"
@@ -55,8 +334,8 @@ def ensure_section(config: dict[str, Any]) -> None:
     """Ensure the peripherals section exists and has table shape."""
 
     if CONFIG_SECTION not in config:
-        config_utils.append_section_yaml(config, DEFAULT_SECTION)
-        visual.print_warning(
+        append_section_yaml(config, DEFAULT_SECTION)
+        print_warning(
             f"Added default '{CONFIG_SECTION}' section to config.yaml. "
             "Please configure the device URLs before running."
         )
@@ -68,7 +347,7 @@ def ensure_section(config: dict[str, Any]) -> None:
 def peripherals_config(config: dict[str, Any]) -> dict[str, Any]:
     """Return the top-level peripherals configuration table."""
 
-    return config_utils.get_table(config, CONFIG_SECTION)
+    return get_table(config, CONFIG_SECTION)
 
 
 def config_key(name: str) -> str:
@@ -91,9 +370,9 @@ def registry_path_from_config(peripherals: dict[str, Any]) -> str:
 def validate_peripherals_config(peripherals: dict[str, Any]) -> None:
     """Report missing required peripheral configuration."""
 
-    config_validation.require_keys(
+    require_keys(
         peripherals,
-        (config_validation.required_key(REGISTRY_PATH_KEY, label=config_key(REGISTRY_PATH_KEY)),),
+        (required_key(REGISTRY_PATH_KEY, label=config_key(REGISTRY_PATH_KEY)),),
     )
 
     for name, value in peripherals.items():
@@ -101,8 +380,8 @@ def validate_peripherals_config(peripherals: dict[str, Any]) -> None:
             continue
 
         if not isinstance(value, dict):
-            visual.print_error("Missing required configuration option(s):")
-            visual.print_error(f"- {config_key(name)} must be a table")
+            print_error("Missing required configuration option(s):")
+            print_error(f"- {config_key(name)} must be a table")
             raise SystemExit(1)
 
         missing_keys: list[str] = []
@@ -111,7 +390,7 @@ def validate_peripherals_config(peripherals: dict[str, Any]) -> None:
         if not str(value.get("off", value.get(False, ""))).strip():
             missing_keys.append(f"{config_key(name)}.off")
 
-        config_validation.report_missing_keys(missing_keys)
+        report_missing_keys(missing_keys)
         if missing_keys:
             raise SystemExit(1)
 
@@ -192,7 +471,7 @@ def trigger_url(url: str) -> None:
             str(CURL_MAX_TIME_SECONDS),
             url,
         ],
-        cwd=config_utils.script_dir(__file__),
+        cwd=script_dir(__file__),
         check=True,
         creationflags=subprocess_creationflags(),
     )
@@ -292,7 +571,7 @@ def parse_arguments(
 def main() -> None:
     """Run the requested peripheral command for selected devices."""
 
-    config = config_utils.load(__file__)
+    config = load(__file__)
     ensure_section(config)
 
     peripherals = peripherals_config(config)
@@ -308,13 +587,13 @@ def main() -> None:
         try:
             run_device_command(registry_path, device, command)
         except (OSError, subprocess.SubprocessError, ValueError) as error:
-            visual.print_error(f"Peripheral command failed: {device.name} /{command}: {error}")
+            print_error(f"Peripheral command failed: {device.name} /{command}: {error}")
             failures.append(f"{device.name}: {error}")
 
     if failures:
         raise RuntimeError(f"{len(failures)} peripheral command(s) failed: {'; '.join(failures)}")
 
-    visual.print_done(f"Peripheral command finished: /{command} for {len(selected_devices)} device(s)")
+    print_done(f"Peripheral command finished: /{command} for {len(selected_devices)} device(s)")
 
 
 if __name__ == "__main__":

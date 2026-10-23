@@ -13,7 +13,6 @@ import pytest
 import archive_media
 import file_operations
 import ssh_tasks
-from winutils_python import config, connect_smb, file_ops, menu, visual
 
 
 def load_script_module(filename: str, name: str) -> ModuleType:
@@ -35,7 +34,7 @@ peripherals = load_script_module("peripherals.pyw", "peripherals_for_tests")
 def test_visual_output_is_preserved_without_tty() -> None:
     output = io.StringIO()
 
-    visual.print_visual("remote result", emoji="success", color="success", stream=output)
+    file_operations.print_visual("remote result", emoji="success", color="success", stream=output)
 
     assert output.getvalue() == "✅ remote result\n"
     assert "\x1b[" not in output.getvalue()
@@ -45,7 +44,7 @@ def test_visual_output_uses_utf8_when_redirected() -> None:
     raw_output = io.BytesIO()
     output = io.TextIOWrapper(raw_output, encoding="cp1252")
 
-    visual.print_visual("remote → result", emoji="success", stream=output)
+    file_operations.print_visual("remote → result", emoji="success", stream=output)
 
     assert raw_output.getvalue() == "✅ remote → result\n".encode()
 
@@ -56,7 +55,7 @@ def test_non_interactive_menu_requires_set_argument(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(sys, "stdin", stdin)
 
     with pytest.raises(SystemExit, match="requires a set name.*backup"):
-        menu.choose_mapping_key_terminal(
+        file_operations.choose_mapping_key_terminal(
             {"backup": {}},
             header="sets",
             empty_message="empty",
@@ -69,16 +68,16 @@ def test_non_interactive_smb_password_fails_fast(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(sys, "stdin", stdin)
 
     with pytest.raises(RuntimeError, match="non-interactive mode"):
-        connect_smb.prompt_password()
+        file_operations.prompt_password()
 
 
 def test_deviceless_smb_connection_uses_unc_share_directly() -> None:
-    mappings = connect_smb.mappings_from_config(
+    mappings = file_operations.mappings_from_config(
         {"mappings": [{"share": r"\\server.example\main"}]}
     )
 
     assert mappings == ((None, r"\\server.example\main"),)
-    assert connect_smb.build_net_use_command(
+    assert file_operations.build_net_use_command(
         None,
         r"\\server.example\main",
         "secret",
@@ -96,10 +95,10 @@ def test_deviceless_smb_connection_uses_unc_share_directly() -> None:
 
 def test_deviceless_smb_reuses_accessible_session(monkeypatch: pytest.MonkeyPatch) -> None:
     run = Mock()
-    monkeypatch.setattr(connect_smb, "unc_share_accessible", lambda _share: True)
-    monkeypatch.setattr(connect_smb.subprocess, "run", run)
+    monkeypatch.setattr(file_operations, "unc_share_accessible", lambda _share: True)
+    monkeypatch.setattr(file_operations.subprocess, "run", run)
 
-    return_code = connect_smb.run_net_use(
+    return_code = file_operations.run_net_use(
         None,
         r"\\server.example\main",
         "secret",
@@ -111,7 +110,7 @@ def test_deviceless_smb_reuses_accessible_session(monkeypatch: pytest.MonkeyPatc
 
 
 def test_mapped_smb_connection_remains_supported() -> None:
-    assert connect_smb.build_net_use_command(
+    assert file_operations.build_net_use_command(
         "R:",
         r"\\server.example\main",
         "secret",
@@ -131,8 +130,8 @@ def test_mapped_smb_connection_remains_supported() -> None:
 def test_unc_coverage_requires_the_same_server_identity() -> None:
     mappings = ((None, r"\\server.example\main"),)
 
-    assert connect_smb.unc_path_covered(r"\\server.example\main\data", mappings)
-    assert not connect_smb.unc_path_covered(r"\\server\main\data", mappings)
+    assert file_operations.unc_path_covered(r"\\server.example\main\data", mappings)
+    assert not file_operations.unc_path_covered(r"\\server\main\data", mappings)
 
 
 def test_file_operations_reject_unmapped_unc_alias() -> None:
@@ -150,7 +149,7 @@ def test_file_operations_reject_unmapped_unc_alias() -> None:
 
 def test_robocopy_accepts_full_unc_path_without_drive_mapping() -> None:
     source = r"\\server.example\main\data\settings\wow_anniversary\WTF"
-    command = file_ops.build_robocopy_command(
+    command = file_operations.build_robocopy_command(
         source,
         r"C:\backup\WTF",
         ("/E",),
@@ -167,10 +166,10 @@ def test_robocopy_oem_output_is_forwarded(monkeypatch: pytest.MonkeyPatch) -> No
     process.wait.return_value = 0
     popen = Mock(return_value=process)
     print_plain = Mock()
-    monkeypatch.setattr(file_ops.subprocess, "Popen", popen)
-    monkeypatch.setattr(file_ops.visual, "print_plain", print_plain)
+    monkeypatch.setattr(file_operations.subprocess, "Popen", popen)
+    monkeypatch.setattr(file_operations, "print_plain", print_plain)
 
-    return_code = file_ops.invoke_robocopy(
+    return_code = file_operations.invoke_robocopy(
         r"C:\source",
         r"C:\target",
         ("/E",),
@@ -185,11 +184,11 @@ def test_robocopy_oem_output_is_forwarded(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_strict_boolean_rejects_quoted_false() -> None:
     with pytest.raises(TypeError, match="must be true or false"):
-        config.optional_bool({"overwrite": "false"}, "overwrite", label="overwrite", default=True)
+        file_operations.optional_bool({"overwrite": "false"}, "overwrite", label="overwrite", default=True)
 
 
 def test_normalized_extension_set_strips_whitespace() -> None:
-    assert config.normalized_extension_set(
+    assert archive_media.normalized_extension_set(
         {"extensions": [" .JPG "]},
         "extensions",
         label="extensions",
