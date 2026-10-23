@@ -38,7 +38,7 @@ uv sync
 
 | Section | Keys |
 | --- | --- |
-| `smb` | `user`, `password`, `mappings` (`share`, optional `drive`) |
+| `smb` | `user`, `password_file`, `mappings` (`share`, optional `drive`) |
 | `files.<set>` | `smb`, `common_options`, `tasks` (`type`, `source`, `target`, `overwrite`, `options`) |
 | `archive.<set>` | `smb`, `extensions`, `tasks` (`source`, `target`) |
 | `dates.<set>` | `smb`, `mode`, `source_folder`, `extensions`, `patterns`, `target_folder`, `change_files_in_place`, `overwrite`, `hour_adjustment` |

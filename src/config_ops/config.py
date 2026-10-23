@@ -12,7 +12,7 @@ from .configfile import ConfigError, mapping, port, positive_seconds, text
 DEFAULT_CONFIG = r"""# SMB shares for sets with "smb: true"; drop the section when unused
 smb:
   user: 'DOMAIN\user'
-  password: "CHANGE_ME"
+  password_file: "CHANGE_ME"   # file beside the executable that holds the password
   mappings:
     - share: '\\server\main'
     - share: '\\server\backup'
@@ -92,7 +92,7 @@ class SmbMapping:
 @dataclass(frozen=True, slots=True)
 class SmbSettings:
     user: str
-    password: str
+    password_file: str
     mappings: tuple[SmbMapping, ...]
 
 
@@ -264,7 +264,7 @@ def _extensions(values: Mapping[str, Any], location: str) -> frozenset[str]:
 # Validate the smb section
 def _parse_smb(value: Any) -> SmbSettings:
     smb = mapping(value, "smb")
-    _keys(smb, {"user", "password", "mappings"}, set(), "smb")
+    _keys(smb, {"user", "password_file", "mappings"}, set(), "smb")
     entries = smb["mappings"]
     if not isinstance(entries, list) or not entries:
         raise ConfigError("smb.mappings must be a non-empty list")
@@ -277,9 +277,17 @@ def _parse_smb(value: Any) -> SmbSettings:
         mappings.append(SmbMapping(share=text(item, "share", location), drive=drive))
     return SmbSettings(
         user=text(smb, "user", "smb"),
-        password=text(smb, "password", "smb"),
+        password_file=_file_name(smb, "password_file", "smb"),
         mappings=tuple(mappings),
     )
+
+
+# Plain file name without folders
+def _file_name(values: Mapping[str, Any], key: str, location: str) -> str:
+    name = text(values, key, location)
+    if name in (".", "..") or "/" in name or "\\" in name:
+        raise ConfigError(f"{location}.{key} must be a file name without folders")
+    return name
 
 
 # Validate one files set

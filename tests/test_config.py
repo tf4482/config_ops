@@ -18,7 +18,7 @@ def config_document() -> dict[str, Any]:
 
 
 def test_template_is_rejected_until_edited() -> None:
-    with pytest.raises(ConfigError, match=r"edit placeholder value at smb\.password"):
+    with pytest.raises(ConfigError, match=r"edit placeholder value at smb\.password_file"):
         parse_config(yaml.safe_load(DEFAULT_CONFIG))
 
 
@@ -37,8 +37,12 @@ def test_valid_document_is_parsed() -> None:
     assert config.peripherals is not None and set(config.peripherals.devices) == {"led"}
 
 
-def empty_smb_password(document: dict[str, Any]) -> None:
-    document["smb"]["password"] = ""
+def empty_password_file(document: dict[str, Any]) -> None:
+    document["smb"]["password_file"] = ""
+
+
+def password_file_in_folder(document: dict[str, Any]) -> None:
+    document["smb"]["password_file"] = "secrets\\smb.pass"
 
 
 def add_unknown_root_key(document: dict[str, Any]) -> None:
@@ -73,7 +77,8 @@ def smb_flag_without_section(document: dict[str, Any]) -> None:
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        (empty_smb_password, r"smb\.password must be a non-empty string"),
+        (empty_password_file, r"smb\.password_file must be a non-empty string"),
+        (password_file_in_folder, r"smb\.password_file must be a file name without folders"),
         (add_unknown_root_key, r"configuration keys are invalid \(unknown: unknown\)"),
         (drop_ssh_host, r"ssh\.remote_backup keys are invalid \(missing: host\)"),
         (bool_ssh_port, r"ssh\.remote_backup\.port must be an integer from 1 to 65535"),

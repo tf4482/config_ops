@@ -14,7 +14,7 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [
 ### Changed
 
 - Merged the former `winutils_python` submodule and the six scripts into one package without duplicated code.
-- Replaced the `.pyw` scripts, `config.yaml`, and the obfuscated SMB password with `config.yml` and `smb.password`.
+- Replaced the `.pyw` scripts, `config.yaml`, and the obfuscated SMB password with `config.yml` and a `smb.password_file` beside the executable.
 - Flattened Robocopy groups into a `tasks` list with a `type` per task.
 
 ### Removed

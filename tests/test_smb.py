@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -44,3 +45,26 @@ def test_unc_coverage_requires_the_same_server_identity() -> None:
     assert smb.unc_path_covered(rf"{SHARE}\data", mappings)
     assert smb.unc_path_covered(r"C:\local", mappings)
     assert not smb.unc_path_covered(r"\\server\main\data", mappings)
+
+
+def test_password_is_read_from_the_file_beside_the_executable(tmp_path: Path) -> None:
+    (tmp_path / "smb.pass").write_bytes(b"\xef\xbb\xbfs3cret pass\r\n")
+
+    assert smb.read_password("smb.pass", tmp_path) == "s3cret pass"
+
+
+@pytest.mark.parametrize("content", [b"", b"\r\n", b"\xff\xfesecret"])
+def test_unusable_password_files_are_rejected_without_content(
+    tmp_path: Path, content: bytes
+) -> None:
+    (tmp_path / "smb.pass").write_bytes(content)
+
+    with pytest.raises(smb.SmbError) as caught:
+        smb.read_password("smb.pass", tmp_path)
+
+    assert "secret" not in str(caught.value)
+
+
+def test_missing_password_file_is_reported(tmp_path: Path) -> None:
+    with pytest.raises(smb.SmbError, match="cannot read password file"):
+        smb.read_password("missing.pass", tmp_path)

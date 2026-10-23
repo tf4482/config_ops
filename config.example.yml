@@ -1,7 +1,7 @@
 # SMB shares for sets with "smb: true"; drop the section when unused
 smb:
   user: 'DOMAIN\user'
-  password: "CHANGE_ME"
+  password_file: "CHANGE_ME"   # file beside the executable that holds the password
   mappings:
     - share: '\\server\main'
     - share: '\\server\backup'

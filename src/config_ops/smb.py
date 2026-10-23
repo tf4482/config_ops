@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .config import SmbMapping, SmbSettings
+from .configfile import launcher_dir
 from .output import GREEN, YELLOW, Printer
 
 # Exit codes of "net use"
@@ -13,17 +14,18 @@ NET_USE_OK = 0
 NET_USE_ALREADY_ASSIGNED = 2
 
 
-# One or more connections failed
+# Connections failed or the password file is unusable
 class SmbError(RuntimeError):
     pass
 
 
 # Connect every mapping; raise after all attempts when any failed
-def connect(printer: Printer, smb: SmbSettings) -> None:
+def connect(printer: Printer, smb: SmbSettings, directory: Path | None = None) -> None:
+    password = read_password(smb.password_file, directory)
     failed: list[str] = []
     for mapping in smb.mappings:
         label = f"{mapping.drive} → {mapping.share}" if mapping.drive else mapping.share
-        return_code = run_net_use(mapping.drive, mapping.share, smb.password, user=smb.user)
+        return_code = run_net_use(mapping.drive, mapping.share, password, user=smb.user)
         if return_code == NET_USE_OK:
             printer.line("✅", f"{label} · connected", GREEN)
         else:
@@ -36,6 +38,21 @@ def connect(printer: Printer, smb: SmbSettings) -> None:
             failed.append(label)
     if failed:
         raise SmbError(f"{len(failed)} connection(s) failed: {', '.join(failed)}")
+
+
+# Password from a file beside the executable; trailing line breaks are dropped
+def read_password(password_file: str, directory: Path | None = None) -> str:
+    path = (directory or launcher_dir()) / password_file
+    try:
+        password = path.read_text(encoding="utf-8-sig").rstrip("\r\n")
+    except UnicodeError:
+        # The message of a decoding error could echo file content
+        raise SmbError(f"password file {path} is not valid UTF-8") from None
+    except OSError as error:
+        raise SmbError(f"cannot read password file {path}: {error.strerror}") from None
+    if not password:
+        raise SmbError(f"password file {path} is empty")
+    return password
 
 
 # Open one mapped or deviceless connection and return the "net use" exit code
