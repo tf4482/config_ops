@@ -2,7 +2,7 @@
 
 All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - DATE
+## [2.0.0] - 2026-10-23
 
 ### Added
 
@@ -14,6 +14,7 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [
 
 ### Changed
 
+- **Breaking:** one binary with subcommands (`config_ops files <set>`) and a strict `config.yml` replace the six scripts and `config.yaml`; existing calls and configuration files must be updated.
 - Updated the shared frame: progress bar with percentage and gradient, `ssh.timeout_seconds` capped at one day.
 - Merged the former `winutils_python` submodule and the six scripts into one package without duplicated code.
 - Replaced the `.pyw` scripts, `config.yaml`, and the obfuscated SMB password with `config.yml` and an optional `smb.password_file` (default `~/.config/.smbcredentials`).
@@ -21,4 +22,5 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [
 
 ### Removed
 
+- The `peripherals` tool and its configuration section.
 - GUI-friendly `.pyw` launchers, and the `VERSION` file; the version lives in `pyproject.toml`.
