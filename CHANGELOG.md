@@ -7,6 +7,7 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [
 ### Added
 
 - Task type `mirror-file` for `files` sets: mirrors a single file to a target path.
+- Several targets (a list) for `mirror` and `mirror-file` tasks.
 
 ## [2.0.0] - 2026-10-23
 

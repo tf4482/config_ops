@@ -24,7 +24,9 @@ files:
         overwrite: false      # optional, default true
       - type: mirror-file     # one file; copied when missing or different
         source: 'C:\settings\app.ini'
-        target: 'D:\backup\app.ini'
+        target:               # one path, or a list for mirror and mirror-file
+          - 'D:\backup\app.ini'
+          - 'E:\backup\app.ini'
 
 # Media archive sets: config_ops archive <set>
 archive:

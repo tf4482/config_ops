@@ -50,6 +50,10 @@ def mirror_file_with_options(document: dict[str, Any]) -> None:
     document["files"]["backup"]["tasks"][2]["options"] = ["/E"]
 
 
+def copy_with_several_targets(document: dict[str, Any]) -> None:
+    document["files"]["backup"]["tasks"][1]["target"] = ["D:/one", "D:/two"]
+
+
 def empty_password_file(document: dict[str, Any]) -> None:
     document["smb"]["password_file"] = ""
 
@@ -95,6 +99,7 @@ def smb_flag_without_section(document: dict[str, Any]) -> None:
         (pattern_without_groups, r"dates\.screenshots\.patterns needs named groups"),
         (smb_flag_without_section, r"files\.backup\.smb requires the smb section"),
         (mirror_file_with_options, r"options is not used by mirror-file"),
+        (copy_with_several_targets, r"tasks\[1\]\.target must be a single path for copy"),
     ],
 )
 def test_invalid_documents_are_rejected(change: Any, message: str) -> None:
@@ -110,3 +115,14 @@ def test_ssh_timeout_is_capped_at_one_day() -> None:
     document["ssh"]["remote_backup"]["timeout_seconds"] = 10**6
 
     assert parse_config(document).ssh["remote_backup"].timeout_seconds == 86400.0
+
+
+def test_several_targets_become_one_task_each() -> None:
+    config = parse_config(config_document())
+
+    tasks = config.files["backup"].tasks
+    assert [(task.kind, task.target) for task in tasks[2:]] == [
+        ("mirror-file", r"D:\backup\app.ini"),
+        ("mirror-file", r"E:\backup\app.ini"),
+    ]
+    assert tasks[2].source == tasks[3].source
