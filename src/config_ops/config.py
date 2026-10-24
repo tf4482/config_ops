@@ -26,13 +26,18 @@ files:
     smb: false
     # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC"]
     tasks:
-      - type: mirror          # mirror | copy | move | sync
+      - type: mirror          # mirror | mirror-file | copy | move | sync
         source: 'C:\data'
         target: 'D:\backup\data'
       - type: copy
         source: 'C:\documents'
         target: 'D:\backup\documents'
         overwrite: false      # optional, default true
+      - type: mirror-file     # one file; copied when missing or different
+        source: 'C:\settings\app.ini'
+        target:               # one path, or a list for mirror and mirror-file
+          - 'D:\backup\app.ini'
+          - 'E:\backup\app.ini'
 
 # Media archive sets: config_ops archive <set>
 archive:
@@ -67,10 +72,11 @@ ssh:
     command: "ls"
 """
 
-FileKind = Literal["mirror", "copy", "move", "sync"]
+FileKind = Literal["mirror", "mirror-file", "copy", "move", "sync"]
 DateMode = Literal["file", "folder", "metadata", "metadata_reverse"]
 
-FILE_KINDS: tuple[FileKind, ...] = ("mirror", "copy", "move", "sync")
+FILE_KINDS: tuple[FileKind, ...] = ("mirror", "mirror-file", "copy", "move", "sync")
+MULTI_TARGET_KINDS = ("mirror", "mirror-file")
 DATE_MODES: tuple[DateMode, ...] = ("file", "folder", "metadata", "metadata_reverse")
 TIMESTAMP_GROUPS = {"month", "day"}
 
@@ -277,16 +283,31 @@ def _parse_file_set(values: Mapping[str, Any], location: str) -> FileSet:
         if kind not in FILE_KINDS:
             raise ConfigError(f"{task_location}.type must be one of: {', '.join(FILE_KINDS)}")
         options = _text_list(item, "options", task_location) if "options" in item else None
-        tasks.append(
-            FileTask(
-                kind=kind,  # pyright: ignore[reportArgumentType]
-                source=text(item, "source", task_location),
-                target=text(item, "target", task_location),
-                overwrite=_flag(item, "overwrite", task_location, default=True),
-                options=options,
+        if kind == "mirror-file" and options is not None:
+            raise ConfigError(f"{task_location}.options is not used by mirror-file")
+        source = text(item, "source", task_location)
+        overwrite = _flag(item, "overwrite", task_location, default=True)
+        # One task per target, run and reported on its own
+        for target in _targets(item, kind, task_location):
+            tasks.append(
+                FileTask(
+                    kind=kind,  # pyright: ignore[reportArgumentType]
+                    source=source,
+                    target=target,
+                    overwrite=overwrite,
+                    options=options,
+                )
             )
-        )
     return FileSet(_flag(values, "smb", location, default=False), common, tuple(tasks))
+
+
+# One target, or a list of targets for mirror and mirror-file
+def _targets(item: Mapping[str, Any], kind: str, location: str) -> tuple[str, ...]:
+    if not isinstance(item.get("target"), list):
+        return (text(item, "target", location),)
+    if kind not in MULTI_TARGET_KINDS:
+        raise ConfigError(f"{location}.target must be a single path for {kind}")
+    return _text_list(item, "target", location)
 
 
 # Validate one archive set

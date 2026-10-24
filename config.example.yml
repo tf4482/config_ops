@@ -15,13 +15,18 @@ files:
     smb: false
     # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC"]
     tasks:
-      - type: mirror          # mirror | copy | move | sync
+      - type: mirror          # mirror | mirror-file | copy | move | sync
         source: 'C:\data'
         target: 'D:\backup\data'
       - type: copy
         source: 'C:\documents'
         target: 'D:\backup\documents'
         overwrite: false      # optional, default true
+      - type: mirror-file     # one file; copied when missing or different
+        source: 'C:\settings\app.ini'
+        target:               # one path, or a list for mirror and mirror-file
+          - 'D:\backup\app.ini'
+          - 'E:\backup\app.ini'
 
 # Media archive sets: config_ops archive <set>
 archive:

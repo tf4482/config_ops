@@ -2,6 +2,17 @@
 
 All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-10-24
+
+### Added
+
+- Task type `mirror-file` for `files` sets: mirrors a single file to a target path.
+- Several targets (a list) for `mirror` and `mirror-file` tasks.
+
+### Changed
+
+- Tasks on an SMB share that cannot be reached are skipped instead of failing the run; they are reported at the end.
+
 ## [2.0.0] - 2026-10-23
 
 ### Added

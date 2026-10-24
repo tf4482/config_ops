@@ -1,7 +1,9 @@
 # SMB connections through "net use", plus UNC path helpers.
 from __future__ import annotations
 
+import re
 import subprocess
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +17,10 @@ DEFAULT_PASSWORD_FILE = "~/.config/.smbcredentials"
 # Exit codes of "net use"
 NET_USE_OK = 0
 NET_USE_ALREADY_ASSIGNED = 2
+# "System error 53 has occurred" and its translations
+SYSTEM_ERROR = re.compile(r"(?i)(?:error|fehler)\s+(\d+)")
+# System errors that mean the server or network cannot be reached, not that access is refused
+UNREACHABLE_ERRORS = frozenset({51, 53, 64, 67, 121, 1203, 1222, 1225, 1231})
 
 
 # Connections failed or the password file is unusable
@@ -28,6 +34,19 @@ class NetUseResult:
     return_code: int
     detail: str = ""
 
+    # System error number named in the message of "net use"
+    @property
+    def system_error(self) -> int | None:
+        match = SYSTEM_ERROR.search(self.detail)
+        return int(match.group(1)) if match else None
+
+
+# A share that cannot be reached: its display label and the path prefixes it covers
+@dataclass(frozen=True, slots=True)
+class Unreachable:
+    label: str
+    prefixes: tuple[str, ...]
+
 
 # User and password from the credentials file
 @dataclass(frozen=True, slots=True)
@@ -36,19 +55,25 @@ class Credentials:
     password: str
 
 
-# Connect every mapping; raise after all attempts when any failed
-def connect(printer: Printer, smb: SmbSettings, directory: Path | None = None) -> None:
+# Connect every mapping; unreachable shares are returned, other failures raise at the end
+def connect(
+    printer: Printer, smb: SmbSettings, directory: Path | None = None
+) -> tuple[Unreachable, ...]:
     credentials = read_credentials(smb.password_file, directory)
     # A username in the file wins over smb.user of the configuration
     user = credentials.user or smb.user
     if user is None:
         raise SmbError("no user: set smb.user or a username= line in the password file")
     failed: list[str] = []
+    unreachable: list[Unreachable] = []
     for mapping in smb.mappings:
         label = f"{mapping.drive} → {mapping.share}" if mapping.drive else mapping.share
         result = run_net_use(mapping.drive, mapping.share, credentials.password, user=user)
         if result.return_code == NET_USE_OK:
             printer.line("✅", f"{label} · connected", GREEN)
+        elif result.system_error in UNREACHABLE_ERRORS:
+            printer.line("⚠️", f"{label} · unreachable · {result.detail}", YELLOW)
+            unreachable.append(_unreachable(mapping, label))
         else:
             printer.line("⚠️", f"{label} · {_reason(mapping, result)}", YELLOW)
             failed.append(label)
@@ -58,6 +83,22 @@ def connect(printer: Printer, smb: SmbSettings, directory: Path | None = None) -
             f"{len(failed)} connection(s) failed: {', '.join(failed)}; "
             f"check smb.user and the password file {source}"
         )
+    return tuple(unreachable)
+
+
+# The unreachable share that holds one of the paths, if any
+def blocked_by(unreachable: Sequence[Unreachable], *paths: str) -> Unreachable | None:
+    for share in unreachable:
+        for path in paths:
+            if any(_under(path, prefix) for prefix in share.prefixes):
+                return share
+    return None
+
+
+# Closing note about work that was skipped; skipped is one share label per skipped item
+def report_skipped(printer: Printer, skipped: Sequence[str]) -> None:
+    for label, count in Counter(skipped).items():
+        printer.line("⚠️", f"Skipped, SMB unreachable: {label} · {count} item(s)", YELLOW)
 
 
 # Credentials from the configured file: a plain password, or username= and password= lines
@@ -191,6 +232,20 @@ def _existing_drive_share(drive: str) -> str | None:
         if part.startswith("\\\\"):
             return part
     return None
+
+
+# Prefixes of a mapping in comparison form: the share and its drive letter
+def _unreachable(mapping: SmbMapping, label: str) -> Unreachable:
+    prefixes = [_normalize(unc_share_root(mapping.share) or mapping.share)]
+    if mapping.drive:
+        prefixes.append(_normalize(mapping.drive))
+    return Unreachable(label, tuple(prefixes))
+
+
+# Whether the path equals the prefix or lies below it
+def _under(path: str, prefix: str) -> bool:
+    normalized = _normalize(path)
+    return normalized == prefix or normalized.startswith((prefix + "\\", prefix + "/"))
 
 
 # Case-insensitive comparison key for UNC paths

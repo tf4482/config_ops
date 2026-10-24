@@ -12,7 +12,7 @@ from .dates import run_date_set
 from .files import FilesError, run_file_set
 from .output import YELLOW, Printer
 from .selection import choose
-from .smb import SmbError, connect
+from .smb import SmbError, Unreachable, connect, report_skipped
 from .ssh import SshError, run_ssh_set
 
 HELP = f"""{PROJECT_NAME} — run configured Windows automation tasks
@@ -123,7 +123,7 @@ def _smb(printer: Printer, config: Config, arguments: CommandLine) -> int:
         return usage_error(arguments.positionals[0])
     if config.smb is None:
         return printer.fail("Configuration", "smb section is missing")
-    return _guarded(printer, "SMB", lambda: _connect(printer, config))
+    return _guarded(printer, "SMB", lambda: _connect_only(printer, config))
 
 
 # Command that takes the name of one configured set
@@ -156,32 +156,33 @@ def _set_command[T](
     return command
 
 
-# Shares are connected before a set that asks for them
-def _connect(printer: Printer, config: Config) -> int:
-    if config.smb is not None:
-        connect(printer, config.smb)
+# Shares are connected before a set that asks for them; unreachable ones are returned
+def _connect(printer: Printer, config: Config) -> tuple[Unreachable, ...]:
+    return connect(printer, config.smb) if config.smb is not None else ()
+
+
+# The smb command: unreachable shares are no error, but they are reported at the end
+def _connect_only(printer: Printer, config: Config) -> int:
+    report_skipped(printer, [share.label for share in _connect(printer, config)])
     return 0
 
 
 # Robocopy set, with shares connected first when asked
 def _run_files(printer: Printer, config: Config, file_set: FileSet) -> int:
-    if file_set.smb:
-        _connect(printer, config)
-    return run_file_set(printer, file_set, config.smb)
+    unreachable = _connect(printer, config) if file_set.smb else ()
+    return run_file_set(printer, file_set, config.smb, unreachable)
 
 
 # Archive set, with shares connected first when asked
 def _run_archive(printer: Printer, config: Config, archive_set: ArchiveSet) -> int:
-    if archive_set.smb:
-        _connect(printer, config)
-    return run_archive_set(printer, archive_set)
+    unreachable = _connect(printer, config) if archive_set.smb else ()
+    return run_archive_set(printer, archive_set, unreachable)
 
 
 # Date set, with shares connected first when asked
 def _run_dates(printer: Printer, config: Config, date_set: DateSet) -> int:
-    if date_set.smb:
-        _connect(printer, config)
-    return run_date_set(printer, date_set)
+    unreachable = _connect(printer, config) if date_set.smb else ()
+    return run_date_set(printer, date_set, unreachable)
 
 
 # SSH set; it never needs shares

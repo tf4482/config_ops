@@ -103,7 +103,7 @@ def test_net_use_message_is_kept_and_the_password_is_masked(
 def test_deviceless_failure_reports_the_message_not_a_drive_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    failure = smb.NetUseResult(2, "System error 53 occurred.")
+    failure = smb.NetUseResult(2, "System error 86 occurred.")
     monkeypatch.setattr(smb, "run_net_use", lambda *_args, **_kwargs: failure)
     monkeypatch.setattr(smb, "read_credentials", lambda *_args: smb.Credentials(None, "secret"))
     stream = io.StringIO()
@@ -113,7 +113,7 @@ def test_deviceless_failure_reports_the_message_not_a_drive_conflict(
         smb.connect(Printer(stream, color=False), settings)
 
     lines = stream.getvalue().splitlines()
-    assert "exit code 2 · System error 53 occurred." in lines[0]
+    assert "exit code 2 · System error 86 occurred." in lines[0]
     assert "drive in use by another share" in lines[1]
 
 
@@ -168,3 +168,32 @@ def test_connect_needs_a_user_from_the_file_or_the_configuration(
 ) -> None:
     with pytest.raises(smb.SmbError, match="no user"):
         connect_with(monkeypatch, None, None)
+
+
+def connect_unreachable(
+    monkeypatch: pytest.MonkeyPatch, stream: io.StringIO
+) -> tuple[smb.Unreachable, ...]:
+    failure = smb.NetUseResult(2, "Systemfehler 53 aufgetreten. Netzwerkpfad nicht gefunden.")
+    monkeypatch.setattr(smb, "run_net_use", lambda *_args, **_kwargs: failure)
+    monkeypatch.setattr(smb, "read_credentials", lambda *_args: smb.Credentials(None, "secret"))
+    settings = SmbSettings("user", None, (SmbMapping(SHARE, "R:"),))
+    return smb.connect(Printer(stream, color=False), settings)
+
+
+def test_unreachable_share_is_returned_instead_of_raised(monkeypatch: pytest.MonkeyPatch) -> None:
+    stream = io.StringIO()
+
+    unreachable = connect_unreachable(monkeypatch, stream)
+
+    assert [share.label for share in unreachable] == [rf"R: → {SHARE}"]
+    assert "unreachable" in stream.getvalue()
+
+
+def test_paths_on_an_unreachable_share_are_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    unreachable = connect_unreachable(monkeypatch, io.StringIO())
+    other = r"\\server.example\other\x"
+
+    assert smb.blocked_by(unreachable, r"C:\local", rf"{SHARE}\data") is unreachable[0]
+    assert smb.blocked_by(unreachable, r"R:\data") is unreachable[0]
+    assert smb.blocked_by(unreachable, r"C:\local", other) is None
+    assert smb.blocked_by(unreachable, r"R:data") is None
