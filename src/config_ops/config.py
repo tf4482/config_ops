@@ -26,13 +26,16 @@ files:
     smb: false
     # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC"]
     tasks:
-      - type: mirror          # mirror | copy | move | sync
+      - type: mirror          # mirror | mirror-file | copy | move | sync
         source: 'C:\data'
         target: 'D:\backup\data'
       - type: copy
         source: 'C:\documents'
         target: 'D:\backup\documents'
         overwrite: false      # optional, default true
+      - type: mirror-file     # one file; copied when missing or different
+        source: 'C:\settings\app.ini'
+        target: 'D:\backup\app.ini'
 
 # Media archive sets: config_ops archive <set>
 archive:
@@ -67,10 +70,10 @@ ssh:
     command: "ls"
 """
 
-FileKind = Literal["mirror", "copy", "move", "sync"]
+FileKind = Literal["mirror", "mirror-file", "copy", "move", "sync"]
 DateMode = Literal["file", "folder", "metadata", "metadata_reverse"]
 
-FILE_KINDS: tuple[FileKind, ...] = ("mirror", "copy", "move", "sync")
+FILE_KINDS: tuple[FileKind, ...] = ("mirror", "mirror-file", "copy", "move", "sync")
 DATE_MODES: tuple[DateMode, ...] = ("file", "folder", "metadata", "metadata_reverse")
 TIMESTAMP_GROUPS = {"month", "day"}
 
@@ -277,6 +280,8 @@ def _parse_file_set(values: Mapping[str, Any], location: str) -> FileSet:
         if kind not in FILE_KINDS:
             raise ConfigError(f"{task_location}.type must be one of: {', '.join(FILE_KINDS)}")
         options = _text_list(item, "options", task_location) if "options" in item else None
+        if kind == "mirror-file" and options is not None:
+            raise ConfigError(f"{task_location}.options is not used by mirror-file")
         tasks.append(
             FileTask(
                 kind=kind,  # pyright: ignore[reportArgumentType]

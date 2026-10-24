@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import FileSet, FileTask, SmbSettings
+from .filemirror import mirror_file
 from .output import CYAN, GREEN, RED, YELLOW, Printer
 from .progress import Progress
 from .robocopy import FAILURE_EXIT_CODE, MAX_ERROR_LINES, Run, Stats, error_lines, run_task
@@ -46,7 +47,7 @@ def run_file_set(printer: Printer, file_set: FileSet, smb: SmbSettings | None) -
             if live:
                 _announce(printer, task)
             started = time.monotonic()
-            run = run_task(task, file_set.common_options)
+            run = _run(task, file_set)
             results.append(TaskResult(task, run, time.monotonic() - started))
             if live:
                 report(printer, results[-1])
@@ -87,7 +88,7 @@ def _counters(printer: Printer, kind: str, stats: Stats | None) -> list[str]:
     # Extras of a mirror are the files it removed
     extras_label = "removed" if kind == "mirror" else "extra"
     counters = [
-        _paint(printer, f"{stats.files} files", CYAN),
+        _paint(printer, f"{stats.files} file{'' if stats.files == 1 else 's'}", CYAN),
         _paint(printer, f"{stats.copied} copied", GREEN if stats.copied else DIM),
         _paint(printer, f"{stats.skipped} unchanged", DIM),
     ]
@@ -103,6 +104,13 @@ def _counters(printer: Printer, kind: str, stats: Stats | None) -> list[str]:
 # Colored segment inside a line; the printer colors whole lines only
 def _paint(printer: Printer, text: str, color: str) -> str:
     return f"\033[{color}m{text}\033[0m" if printer.color else text
+
+
+# One file is mirrored by copying, everything else by Robocopy
+def _run(task: FileTask, file_set: FileSet) -> Run:
+    if task.kind == "mirror-file":
+        return mirror_file(task)
+    return run_task(task, file_set.common_options)
 
 
 def _announce(printer: Printer, task: FileTask) -> None:

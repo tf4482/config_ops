@@ -2,6 +2,12 @@
 
 All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Task type `mirror-file` for `files` sets: mirrors a single file to a target path.
+
 ## [2.0.0] - 2026-10-23
 
 ### Added

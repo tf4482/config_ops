@@ -42,7 +42,12 @@ def test_valid_document_is_parsed() -> None:
 
     assert config.smb is not None and config.smb.mappings[1].drive == "R:"
     assert config.files["backup"].tasks[1].overwrite is False
+    assert config.files["backup"].tasks[2].kind == "mirror-file"
     assert config.dates["screenshots"].change_files_in_place is True
+
+
+def mirror_file_with_options(document: dict[str, Any]) -> None:
+    document["files"]["backup"]["tasks"][2]["options"] = ["/E"]
 
 
 def empty_password_file(document: dict[str, Any]) -> None:
@@ -89,6 +94,7 @@ def smb_flag_without_section(document: dict[str, Any]) -> None:
         (extension_without_dot, r"archive\.photos\.extensions must contain extensions"),
         (pattern_without_groups, r"dates\.screenshots\.patterns needs named groups"),
         (smb_flag_without_section, r"files\.backup\.smb requires the smb section"),
+        (mirror_file_with_options, r"options is not used by mirror-file"),
     ],
 )
 def test_invalid_documents_are_rejected(change: Any, message: str) -> None:
