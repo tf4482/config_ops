@@ -2,19 +2,29 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
 from .config import ArchiveSet
-from .output import GREEN, RED, Printer
+from .output import GREEN, RED, YELLOW, Printer
+from .smb import Unreachable, blocked_by, report_skipped
 
 
-# Run all tasks of a set; a failed task does not stop the others
-def run_archive_set(printer: Printer, archive_set: ArchiveSet) -> int:
+# Run all tasks of a set; a failed task does not stop the others, an unreachable share skips
+def run_archive_set(
+    printer: Printer, archive_set: ArchiveSet, unreachable: Sequence[Unreachable] = ()
+) -> int:
     failed = 0
     moved_total = 0
+    skipped: list[str] = []
     for task in archive_set.tasks:
         printer.line("🗃️", f"{task.source} → {task.target}")
+        blocked = blocked_by(unreachable, task.source, task.target)
+        if blocked is not None:
+            printer.line("⏭️", f"skipped · {blocked.label} unreachable", YELLOW)
+            skipped.append(blocked.label)
+            continue
         try:
             moved = archive_media(
                 printer, Path(task.source), Path(task.target), archive_set.extensions
@@ -27,9 +37,10 @@ def run_archive_set(printer: Printer, archive_set: ArchiveSet) -> int:
         else:
             moved_total += moved
             printer.line("✅", f"{moved} file(s) moved", GREEN)
-    printer.line(
-        "📋", f"{len(archive_set.tasks) - failed} succeeded · {failed} failed · {moved_total} moved"
-    )
+    succeeded = len(archive_set.tasks) - failed - len(skipped)
+    summary = f"{succeeded} succeeded · {failed} failed · {moved_total} moved"
+    printer.line("📋", summary + (f" · {len(skipped)} skipped" if skipped else ""))
+    report_skipped(printer, skipped)
     return 1 if failed else 0
 
 

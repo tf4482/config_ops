@@ -5,7 +5,7 @@ Configuration-driven Windows automation in a single binary: SMB shares, Robocopy
 ## ✨ Features
 
 - 🔌 **SMB**: Connects shares as drive mappings or direct UNC sessions with `net use`.
-- 📦 **Files**: Runs Robocopy `mirror`, `copy`, `move`, and bidirectional `sync` tasks per set.
+- 📦 **Files**: Runs Robocopy `mirror`, `copy`, `move`, and bidirectional `sync` tasks per set, and mirrors single files with `mirror-file`.
 - 🗃️ **Archive**: Moves media recursively into `YYYY/MM/DD` folders by creation date.
 - 🕒 **Dates**: Sets Windows file times from filenames, folder names, or EXIF/QuickTime metadata, or writes metadata from file times.
 - 🔐 **SSH**: Runs a named command over `ssh` without ever prompting, with a timeout.
@@ -27,9 +27,10 @@ uv sync
 ## 🧭 Tools
 
 - **Sets**: `files`, `archive`, `dates`, and `ssh` take the name of a configured set. Sets with `smb: true` connect all shares first.
-- **Files**: `mirror` can delete extra target content. `sync` keeps the newer file, never purges, and rejects identical or nested folders. UNC paths need a matching `smb.mappings` share. Robocopy exit codes below `8` count as success.
+- **Files**: `mirror-file` copies one file when the target is missing or differs (size or time), creating target folders; `overwrite: false` keeps an existing target. `mirror` and `mirror-file` accept a list of targets (`target:` with several lines); each target is a task of its own. `mirror` can delete extra target content. `sync` keeps the newer file, never purges, and rejects identical or nested folders. UNC paths need a matching `smb.mappings` share. Robocopy exit codes below `8` count as success.
 - **Archive**: Replaces an existing file at the destination; the target must not be inside the source.
 - **Dates**: `file` reads the filename (source folder only), `folder` the containing folder name, `metadata` the embedded EXIF/QuickTime time, and `metadata_reverse` writes the modification time into the metadata. All but `file` scan recursively.
+- **Unreachable shares**: When a share cannot be reached (server off, name not found, network down), its tasks are skipped, the run still succeeds with exit code `0`, and a closing `⚠️ Skipped, SMB unreachable` line names the share and the number of skipped items. Wrong credentials stay an error.
 - **SMB password**: Read from the file named by `smb.password_file`. A bare file name is looked up beside the executable, an absolute or `~` path is used as given. Without the key, `~/.config/.smbcredentials` is used. The file holds the plain password in UTF-8, or a credentials file with `username=` and `password=` lines (other lines are ignored). A `username=` line wins over `smb.user`, so `smb.user` can be left out.
 
 ## ⚙️ Configuration
