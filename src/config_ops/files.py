@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from .filemirror import mirror_file
 from .output import CYAN, GREEN, RED, YELLOW, Printer
 from .progress import Progress
 from .robocopy import FAILURE_EXIT_CODE, MAX_ERROR_LINES, Run, Stats, error_lines, run_task
-from .smb import unc_path_covered, unc_share_root
+from .smb import Unreachable, blocked_by, report_skipped, unc_path_covered, unc_share_root
 
 # Dim text for counters that carry no news
 DIM = "2"
@@ -23,22 +24,28 @@ class FilesError(RuntimeError):
     pass
 
 
-# A finished task with its run and duration
+# A finished task with its run and duration; skipped names the unreachable share
 @dataclass(frozen=True, slots=True)
 class TaskResult:
     task: FileTask
     run: Run
     seconds: float
+    skipped: str | None = None
 
     @property
     def failed(self) -> bool:
         return self.run.return_code >= FAILURE_EXIT_CODE
 
 
-# Run all tasks of a set in order; returns 1 when any task failed
-def run_file_set(printer: Printer, file_set: FileSet, smb: SmbSettings | None) -> int:
+# Run all tasks of a set in order; tasks on unreachable shares are skipped, not failed
+def run_file_set(
+    printer: Printer,
+    file_set: FileSet,
+    smb: SmbSettings | None,
+    unreachable: Sequence[Unreachable] = (),
+) -> int:
     _check_unc_paths(file_set, smb)
-    _prepare_all_sync_folders(file_set)
+    _prepare_all_sync_folders(file_set, unreachable)
     # Without a terminal there is no bar, so every task reports as soon as it is done
     live = not printer.stream.isatty()
     results: list[TaskResult] = []
@@ -46,9 +53,12 @@ def run_file_set(printer: Printer, file_set: FileSet, smb: SmbSettings | None) -
         for task in file_set.tasks:
             if live:
                 _announce(printer, task)
+            blocked = blocked_by(unreachable, task.source, task.target)
             started = time.monotonic()
-            run = _run(task, file_set)
-            results.append(TaskResult(task, run, time.monotonic() - started))
+            if blocked is None:
+                results.append(TaskResult(task, _run(task, file_set), time.monotonic() - started))
+            else:
+                results.append(TaskResult(task, Run(0, (), None), 0.0, blocked.label))
             if live:
                 report(printer, results[-1])
             bar.step(f"{task.kind} · {Path(task.source).name or task.source}")
@@ -58,7 +68,10 @@ def run_file_set(printer: Printer, file_set: FileSet, smb: SmbSettings | None) -
             _announce(printer, result.task)
             report(printer, result)
     failed = sum(result.failed for result in results)
-    printer.line("📋", f"{len(results) - failed} succeeded · {failed} failed")
+    skipped = [result.skipped for result in results if result.skipped]
+    summary = f"{len(results) - failed - len(skipped)} succeeded · {failed} failed"
+    printer.line("📋", summary + (f" · {len(skipped)} skipped" if skipped else ""))
+    report_skipped(printer, skipped)
     return 1 if failed else 0
 
 
@@ -66,6 +79,9 @@ def run_file_set(printer: Printer, file_set: FileSet, smb: SmbSettings | None) -
 def report(printer: Printer, result: TaskResult) -> None:
     kind = result.task.kind
     code = result.run.return_code
+    if result.skipped:
+        printer.line("⏭️", f"{kind} · skipped · {result.skipped} unreachable", YELLOW)
+        return
     if result.failed:
         parts = [kind, f"exit code {code}", *_counters(printer, kind, result.run.stats)]
         printer.line("❌", " · ".join([*parts, f"{result.seconds:.1f}s"]), RED)
@@ -143,8 +159,8 @@ def _check_unc_paths(file_set: FileSet, smb: SmbSettings | None) -> None:
                 raise FilesError(f"{unc_share_root(path)} has no matching smb mapping")
 
 
-# Prepare the folders of every sync task
-def _prepare_all_sync_folders(file_set: FileSet) -> None:
+# Prepare the folders of every sync task whose shares can be reached
+def _prepare_all_sync_folders(file_set: FileSet, unreachable: Sequence[Unreachable]) -> None:
     for task in file_set.tasks:
-        if task.kind == "sync":
+        if task.kind == "sync" and blocked_by(unreachable, task.source, task.target) is None:
             prepare_sync_folders(task.source, task.target)

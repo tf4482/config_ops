@@ -6,9 +6,10 @@ from pathlib import Path
 import pytest
 
 from config_ops import files
-from config_ops.config import FileSet, FileTask
+from config_ops.config import FileSet, FileTask, SmbMapping, SmbSettings
 from config_ops.output import Printer
 from config_ops.robocopy import Run, Stats
+from config_ops.smb import Unreachable
 
 UNC = r"\\server.example\main\data"
 STATS = Stats(files=719, copied=1, skipped=718, mismatched=0, failed=0, extras=3)
@@ -90,3 +91,21 @@ def test_terminal_run_prints_the_lines_after_the_progress_bar(
     text = stream.getvalue()
     assert text.rstrip().endswith("2 succeeded · 0 failed")
     assert text.index("📦 mirror") < text.index("✅ mirror") < text.index("📦 copy")
+
+
+def test_tasks_on_an_unreachable_share_are_skipped_without_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(files, "run_task", lambda *_args: Run(0, (), STATS))
+    unreachable = (Unreachable("vx-00", (r"\\server.example\main",)),)
+    printer, stream = capture()
+    file_set = FileSet(True, None, (task("mirror", target=UNC), task("copy")))
+    smb = SmbSettings(None, None, (SmbMapping(UNC.rsplit("\\", 1)[0], None),))
+
+    assert files.run_file_set(printer, file_set, smb, unreachable) == 0
+
+    text = stream.getvalue()
+    assert "⏭️ mirror · skipped · vx-00 unreachable" in text
+    assert "✅ copy" in text
+    assert "1 succeeded · 0 failed · 1 skipped" in text
+    assert text.rstrip().endswith("Skipped, SMB unreachable: vx-00 · 1 item(s)")

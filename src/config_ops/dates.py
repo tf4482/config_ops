@@ -3,29 +3,39 @@ from __future__ import annotations
 
 import re
 import shutil
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import filetime, metadata
 from .config import DateSet
-from .output import GREEN, RED, Printer
+from .output import GREEN, RED, YELLOW, Printer
+from .smb import Unreachable, blocked_by, report_skipped
 
 # Folder created below the source when files are copied without a target folder
 DEFAULT_TARGET_NAME = "changed_date"
 
 
 # Run one set; a failed file does not stop the others
-def run_date_set(printer: Printer, date_set: DateSet) -> int:
+def run_date_set(
+    printer: Printer, date_set: DateSet, unreachable: Sequence[Unreachable] = ()
+) -> int:
     source = Path(date_set.source_folder)
     in_place = date_set.change_files_in_place
     target = source if in_place else Path(date_set.target_folder or source / DEFAULT_TARGET_NAME)
+    printer.line("🕒", f"{source} · {date_set.mode} mode")
+    # A set on an unreachable share is skipped as a whole
+    blocked = blocked_by(unreachable, str(source), str(target))
+    if blocked is not None:
+        printer.line("⏭️", f"skipped · {blocked.label} unreachable", YELLOW)
+        report_skipped(printer, [blocked.label])
+        return 0
     if not in_place:
         target.mkdir(parents=True, exist_ok=True)
     # A target below the source is never scanned again
     excluded = target if not in_place and _is_relative_to(target, source) else None
     recursive = date_set.mode != "file"
     relative_root = source if recursive else None
-    printer.line("🕒", f"{source} · {date_set.mode} mode")
 
     updated = skipped = failed = 0
     for path in _matching_files(source, date_set.extensions, recursive, excluded):
