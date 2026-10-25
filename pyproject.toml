@@ -1,6 +1,6 @@
 [project]
 name = "config_ops"
-version = "2.1.0"
+version = "3.0.0"
 description = "Configuration-driven Windows automation: SMB, Robocopy, media archiving, file dates, and SSH."
 readme = "README.md"
 license = "MIT"
