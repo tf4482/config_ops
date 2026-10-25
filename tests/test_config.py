@@ -54,6 +54,14 @@ def copy_with_several_targets(document: dict[str, Any]) -> None:
     document["files"]["backup"]["tasks"][1]["target"] = ["D:/one", "D:/two"]
 
 
+def mirror_file_with_excludes(document: dict[str, Any]) -> None:
+    document["files"]["backup"]["tasks"][2]["exclude_files"] = ["*.tmp"]
+
+
+def empty_exclude_list(document: dict[str, Any]) -> None:
+    document["robocopy"]["exclude_dirs"] = []
+
+
 def empty_password_file(document: dict[str, Any]) -> None:
     document["smb"]["password_file"] = ""
 
@@ -98,7 +106,9 @@ def smb_flag_without_section(document: dict[str, Any]) -> None:
         (extension_without_dot, r"archive\.photos\.extensions must contain extensions"),
         (pattern_without_groups, r"dates\.screenshots\.patterns needs named groups"),
         (smb_flag_without_section, r"files\.backup\.smb requires the smb section"),
-        (mirror_file_with_options, r"options is not used by mirror-file"),
+        (mirror_file_with_options, r"options and excludes are not used by mirror-file"),
+        (mirror_file_with_excludes, r"options and excludes are not used by mirror-file"),
+        (empty_exclude_list, r"robocopy\.exclude_dirs must be a non-empty list"),
         (copy_with_several_targets, r"tasks\[1\]\.target must be a single path for copy"),
     ],
 )
@@ -126,3 +136,21 @@ def test_several_targets_become_one_task_each() -> None:
         ("mirror-file", r"E:\backup\app.ini"),
     ]
     assert tasks[2].source == tasks[3].source
+
+
+def test_robocopy_settings_and_task_excludes_are_parsed() -> None:
+    config = parse_config(config_document())
+
+    assert "System Volume Information" in config.robocopy.exclude_dirs
+    assert config.robocopy.exclude_files == ("desktop.ini",)
+    assert config.files["backup"].tasks[0].exclude_dirs == (".venv", "node_modules")
+    assert config.files["backup"].tasks[0].exclude_files == ("*.pyc",)
+
+
+def test_missing_robocopy_section_excludes_nothing() -> None:
+    document = config_document()
+    del document["robocopy"]
+
+    config = parse_config(document)
+
+    assert config.robocopy.exclude_dirs == () and config.robocopy.common_options is None

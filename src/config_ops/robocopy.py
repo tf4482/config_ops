@@ -5,21 +5,10 @@ import re
 import subprocess
 from dataclasses import dataclass
 
-from .config import FileKind, FileTask
+from .config import FileKind, FileTask, RobocopySettings
 
 # Robocopy reports failures with exit codes from 8 up
 FAILURE_EXIT_CODE = 8
-EXCLUDE_DIRS = (
-    "cache",
-    "shadercache",
-    ".recycle",
-    "$RECYCLE.BIN",
-    "System Volume Information",
-    "My Music",
-    "My Videos",
-    "My Pictures",
-)
-EXCLUDE_FILES = ("desktop.ini",)
 COMMON_OPTIONS = (
     "/MT:32",
     "/W:2",
@@ -72,15 +61,31 @@ class Run:
     stats: Stats | None
 
 
-# Run the task; sync runs a forward and a reverse pass
-def run_task(task: FileTask, common_options: tuple[str, ...] | None) -> Run:
-    options = task_options(task, common_options)
+# Run the task; sync runs a forward and a reverse pass. Common options of the set win
+# over the global ones, and the excludes of the task add to the global ones.
+def run_task(
+    task: FileTask, set_common_options: tuple[str, ...] | None, settings: RobocopySettings
+) -> Run:
+    options = task_options(task, set_common_options or settings.common_options)
+    exclude_dirs = tuple(dict.fromkeys((*settings.exclude_dirs, *task.exclude_dirs)))
+    exclude_files = tuple(dict.fromkeys((*settings.exclude_files, *task.exclude_files)))
     if task.kind != "sync":
-        return invoke_robocopy(task.source, task.target, options, overwrite=task.overwrite)
-    forward = invoke_robocopy(task.source, task.target, options)
+        return invoke_robocopy(
+            task.source,
+            task.target,
+            options,
+            overwrite=task.overwrite,
+            exclude_dirs=exclude_dirs,
+            exclude_files=exclude_files,
+        )
+    forward = invoke_robocopy(
+        task.source, task.target, options, exclude_dirs=exclude_dirs, exclude_files=exclude_files
+    )
     if forward.return_code >= FAILURE_EXIT_CODE:
         return forward
-    reverse = invoke_robocopy(task.target, task.source, options)
+    reverse = invoke_robocopy(
+        task.target, task.source, options, exclude_dirs=exclude_dirs, exclude_files=exclude_files
+    )
     if reverse.return_code >= FAILURE_EXIT_CODE:
         return Run(reverse.return_code, forward.lines + reverse.lines, None)
     stats = _sync_stats(forward.stats, reverse.stats)
@@ -116,19 +121,38 @@ def task_options(task: FileTask, common_options: tuple[str, ...] | None) -> tupl
 
 # Command line of one Robocopy call
 def build_robocopy_command(
-    source: str, target: str, options: tuple[str, ...], *, overwrite: bool
+    source: str,
+    target: str,
+    options: tuple[str, ...],
+    *,
+    overwrite: bool,
+    exclude_dirs: tuple[str, ...] = (),
+    exclude_files: tuple[str, ...] = (),
 ) -> list[str]:
     effective = options if overwrite else (*options, "/XN", "/XO", "/XX")
-    excludes = [item for name in EXCLUDE_DIRS for item in ("/XD", name)]
-    excludes += [item for name in EXCLUDE_FILES for item in ("/XF", name)]
+    excludes = [item for name in exclude_dirs for item in ("/XD", name)]
+    excludes += [item for name in exclude_files for item in ("/XF", name)]
     return ["robocopy", source, target, *effective, *excludes]
 
 
 # Run Robocopy once and keep its output; Robocopy is stopped when the run is interrupted
 def invoke_robocopy(
-    source: str, target: str, options: tuple[str, ...], *, overwrite: bool = True
+    source: str,
+    target: str,
+    options: tuple[str, ...],
+    *,
+    overwrite: bool = True,
+    exclude_dirs: tuple[str, ...] = (),
+    exclude_files: tuple[str, ...] = (),
 ) -> Run:
-    command = build_robocopy_command(source, target, options, overwrite=overwrite)
+    command = build_robocopy_command(
+        source,
+        target,
+        options,
+        overwrite=overwrite,
+        exclude_dirs=exclude_dirs,
+        exclude_files=exclude_files,
+    )
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
