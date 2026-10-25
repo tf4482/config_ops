@@ -2,6 +2,16 @@
 
 All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-10-25
+
+### Added
+
+- Global `robocopy` section (`common_options`, `exclude_dirs`, `exclude_files`) and per-task `exclude_dirs` and `exclude_files` for Robocopy tasks.
+
+### Changed
+
+- **Breaking:** the built-in excludes (`cache`, `shadercache`, `.recycle`, `$RECYCLE.BIN`, `System Volume Information`, `My Music`, `My Videos`, `My Pictures`, `desktop.ini`) moved into the configuration; add them to `robocopy` to keep excluding them.
+
 ## [2.1.0] - 2026-10-24
 
 ### Added

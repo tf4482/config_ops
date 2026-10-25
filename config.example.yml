@@ -9,6 +9,21 @@ smb:
     - share: '\\server\backup'
       drive: "R:"
 
+# Settings for all Robocopy tasks (mirror, copy, move, sync); excludes of a task add to these
+robocopy:
+  # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC"]   # default for sets without their own
+  exclude_dirs:
+    - "cache"
+    - "shadercache"
+    - ".recycle"
+    - "$RECYCLE.BIN"
+    - "System Volume Information"
+    - "My Music"
+    - "My Videos"
+    - "My Pictures"
+  exclude_files:
+    - "desktop.ini"
+
 # Robocopy sets: config_ops files <set>
 files:
   backup:
@@ -18,6 +33,8 @@ files:
       - type: mirror          # mirror | mirror-file | copy | move | sync
         source: 'C:\data'
         target: 'D:\backup\data'
+        exclude_dirs: [".venv", "node_modules"]   # optional, also for copy, move, sync
+        exclude_files: ["*.pyc"]                  # optional
       - type: copy
         source: 'C:\documents'
         target: 'D:\backup\documents'

@@ -30,6 +30,7 @@ uv sync
 - **Files**: `mirror-file` copies one file when the target is missing or differs (size or time), creating target folders; `overwrite: false` keeps an existing target. `mirror` and `mirror-file` accept a list of targets (`target:` with several lines); each target is a task of its own. `mirror` can delete extra target content. `sync` keeps the newer file, never purges, and rejects identical or nested folders. UNC paths need a matching `smb.mappings` share. Robocopy exit codes below `8` count as success.
 - **Archive**: Replaces an existing file at the destination; the target must not be inside the source.
 - **Dates**: `file` reads the filename (source folder only), `folder` the containing folder name, `metadata` the embedded EXIF/QuickTime time, and `metadata_reverse` writes the modification time into the metadata. All but `file` scan recursively.
+- **Excludes**: `robocopy.exclude_dirs` and `robocopy.exclude_files` apply to every Robocopy task (`mirror`, `copy`, `move`, `sync`); `exclude_dirs` and `exclude_files` on a task add to them. Nothing is excluded unless you list it, `config.example.yml` shows the usual system folders. `robocopy.common_options` is the default for sets without their own `common_options`.
 - **Unreachable shares**: When a share cannot be reached (server off, name not found, network down), its tasks are skipped, the run still succeeds with exit code `0`, and a closing `⚠️ Skipped, SMB unreachable` line names the share and the number of skipped items. Wrong credentials stay an error.
 - **SMB password**: Read from the file named by `smb.password_file`. A bare file name is looked up beside the executable, an absolute or `~` path is used as given. Without the key, `~/.config/.smbcredentials` is used. The file holds the plain password in UTF-8, or a credentials file with `username=` and `password=` lines (other lines are ignored). A `username=` line wins over `smb.user`, so `smb.user` can be left out.
 
@@ -40,7 +41,8 @@ uv sync
 | Section | Keys |
 | --- | --- |
 | `smb` | optional `user`, optional `password_file`, `mappings` (`share`, optional `drive`) |
-| `files.<set>` | `smb`, `common_options`, `tasks` (`type`, `source`, `target`, `overwrite`, `options`) |
+| `robocopy` | optional `common_options`, `exclude_dirs`, `exclude_files` for all Robocopy tasks |
+| `files.<set>` | `smb`, `common_options`, `tasks` (`type`, `source`, `target`, `overwrite`, `options`, `exclude_dirs`, `exclude_files`) |
 | `archive.<set>` | `smb`, `extensions`, `tasks` (`source`, `target`) |
 | `dates.<set>` | `smb`, `mode`, `source_folder`, `extensions`, `patterns`, `target_folder`, `change_files_in_place`, `overwrite`, `hour_adjustment` |
 | `ssh.<set>` | `user`, `host`, `port`, `timeout_seconds`, `command` |
