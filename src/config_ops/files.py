@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import FileSet, FileTask, SmbSettings
+from .config import FileSet, FileTask, RobocopySettings, SmbSettings
 from .filemirror import mirror_file
 from .output import CYAN, GREEN, RED, YELLOW, Printer
 from .progress import Progress
@@ -43,6 +43,7 @@ def run_file_set(
     file_set: FileSet,
     smb: SmbSettings | None,
     unreachable: Sequence[Unreachable] = (),
+    robocopy: RobocopySettings | None = None,
 ) -> int:
     _check_unc_paths(file_set, smb)
     _prepare_all_sync_folders(file_set, unreachable)
@@ -56,7 +57,13 @@ def run_file_set(
             blocked = blocked_by(unreachable, task.source, task.target)
             started = time.monotonic()
             if blocked is None:
-                results.append(TaskResult(task, _run(task, file_set), time.monotonic() - started))
+                results.append(
+                    TaskResult(
+                        task,
+                        _run(task, file_set, robocopy or RobocopySettings()),
+                        time.monotonic() - started,
+                    )
+                )
             else:
                 results.append(TaskResult(task, Run(0, (), None), 0.0, blocked.label))
             if live:
@@ -123,10 +130,10 @@ def _paint(printer: Printer, text: str, color: str) -> str:
 
 
 # One file is mirrored by copying, everything else by Robocopy
-def _run(task: FileTask, file_set: FileSet) -> Run:
+def _run(task: FileTask, file_set: FileSet, robocopy: RobocopySettings) -> Run:
     if task.kind == "mirror-file":
         return mirror_file(task)
-    return run_task(task, file_set.common_options)
+    return run_task(task, file_set.common_options, robocopy)
 
 
 def _announce(printer: Printer, task: FileTask) -> None:

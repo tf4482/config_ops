@@ -20,6 +20,21 @@ smb:
     - share: '\\server\backup'
       drive: "R:"
 
+# Settings for all Robocopy tasks (mirror, copy, move, sync); excludes of a task add to these
+robocopy:
+  # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC"]   # default for sets without their own
+  exclude_dirs:
+    - "cache"
+    - "shadercache"
+    - ".recycle"
+    - "$RECYCLE.BIN"
+    - "System Volume Information"
+    - "My Music"
+    - "My Videos"
+    - "My Pictures"
+  exclude_files:
+    - "desktop.ini"
+
 # Robocopy sets: config_ops files <set>
 files:
   backup:
@@ -29,6 +44,8 @@ files:
       - type: mirror          # mirror | mirror-file | copy | move | sync
         source: 'C:\data'
         target: 'D:\backup\data'
+        exclude_dirs: [".venv", "node_modules"]   # optional, also for copy, move, sync
+        exclude_files: ["*.pyc"]                  # optional
       - type: copy
         source: 'C:\documents'
         target: 'D:\backup\documents'
@@ -96,7 +113,7 @@ class SmbSettings:
     mappings: tuple[SmbMapping, ...]
 
 
-# One Robocopy operation
+# One Robocopy operation; its excludes add to the global ones
 @dataclass(frozen=True, slots=True)
 class FileTask:
     kind: FileKind
@@ -104,6 +121,16 @@ class FileTask:
     target: str
     overwrite: bool
     options: tuple[str, ...] | None
+    exclude_dirs: tuple[str, ...] = ()
+    exclude_files: tuple[str, ...] = ()
+
+
+# Settings for all Robocopy tasks
+@dataclass(frozen=True, slots=True)
+class RobocopySettings:
+    common_options: tuple[str, ...] | None = None
+    exclude_dirs: tuple[str, ...] = ()
+    exclude_files: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +179,7 @@ class SshSet:
 @dataclass(frozen=True, slots=True)
 class Config:
     smb: SmbSettings | None
+    robocopy: RobocopySettings
     files: Mapping[str, FileSet]
     archive: Mapping[str, ArchiveSet]
     dates: Mapping[str, DateSet]
@@ -161,9 +189,10 @@ class Config:
 # Strict validation of the decoded YAML document
 def parse_config(document: Any) -> Config:
     root = mapping(document, "configuration")
-    _keys(root, set(), {"smb", "files", "archive", "dates", "ssh"}, "configuration")
+    _keys(root, set(), {"smb", "robocopy", "files", "archive", "dates", "ssh"}, "configuration")
     config = Config(
         smb=_parse_smb(root["smb"]) if "smb" in root else None,
+        robocopy=_parse_robocopy(root["robocopy"]) if "robocopy" in root else RobocopySettings(),
         files=_sets(root.get("files"), "files", _parse_file_set),
         archive=_sets(root.get("archive"), "archive", _parse_archive_set),
         dates=_sets(root.get("dates"), "dates", _parse_date_set),
@@ -237,6 +266,11 @@ def _text_list(values: Mapping[str, Any], key: str, location: str) -> tuple[str,
     return tuple(items)
 
 
+# Non-empty list of strings when the key is present, else None
+def _optional_list(values: Mapping[str, Any], key: str, location: str) -> tuple[str, ...] | None:
+    return _text_list(values, key, location) if key in values else None
+
+
 # Lowercase file extensions with a leading dot
 def _extensions(values: Mapping[str, Any], location: str) -> frozenset[str]:
     extensions = frozenset(item.lower() for item in _text_list(values, "extensions", location))
@@ -267,6 +301,17 @@ def _parse_smb(value: Any) -> SmbSettings:
     )
 
 
+# Validate the robocopy section
+def _parse_robocopy(value: Any) -> RobocopySettings:
+    robocopy = mapping(value, "robocopy")
+    _keys(robocopy, set(), {"common_options", "exclude_dirs", "exclude_files"}, "robocopy")
+    return RobocopySettings(
+        common_options=_optional_list(robocopy, "common_options", "robocopy"),
+        exclude_dirs=_optional_list(robocopy, "exclude_dirs", "robocopy") or (),
+        exclude_files=_optional_list(robocopy, "exclude_files", "robocopy") or (),
+    )
+
+
 # Validate one files set
 def _parse_file_set(values: Mapping[str, Any], location: str) -> FileSet:
     _keys(values, {"tasks"}, {"smb", "common_options"}, location)
@@ -278,13 +323,20 @@ def _parse_file_set(values: Mapping[str, Any], location: str) -> FileSet:
     for index, entry in enumerate(entries):
         task_location = f"{location}.tasks[{index}]"
         item = mapping(entry, task_location)
-        _keys(item, {"type", "source", "target"}, {"overwrite", "options"}, task_location)
+        _keys(
+            item,
+            {"type", "source", "target"},
+            {"overwrite", "options", "exclude_dirs", "exclude_files"},
+            task_location,
+        )
         kind = text(item, "type", task_location)
         if kind not in FILE_KINDS:
             raise ConfigError(f"{task_location}.type must be one of: {', '.join(FILE_KINDS)}")
         options = _text_list(item, "options", task_location) if "options" in item else None
-        if kind == "mirror-file" and options is not None:
-            raise ConfigError(f"{task_location}.options is not used by mirror-file")
+        exclude_dirs = _optional_list(item, "exclude_dirs", task_location)
+        exclude_files = _optional_list(item, "exclude_files", task_location)
+        if kind == "mirror-file" and (options or exclude_dirs or exclude_files):
+            raise ConfigError(f"{task_location} options and excludes are not used by mirror-file")
         source = text(item, "source", task_location)
         overwrite = _flag(item, "overwrite", task_location, default=True)
         # One task per target, run and reported on its own
@@ -296,6 +348,8 @@ def _parse_file_set(values: Mapping[str, Any], location: str) -> FileSet:
                     target=target,
                     overwrite=overwrite,
                     options=options,
+                    exclude_dirs=exclude_dirs or (),
+                    exclude_files=exclude_files or (),
                 )
             )
     return FileSet(_flag(values, "smb", location, default=False), common, tuple(tasks))

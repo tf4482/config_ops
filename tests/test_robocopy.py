@@ -93,3 +93,38 @@ def test_failures_show_only_the_error_entries_and_their_messages() -> None:
 
     assert robocopy.error_lines(lines) == [lines[1], lines[2], lines[4], lines[5]]
     assert robocopy.error_lines(("Invalid Parameter #3",)) == ["Invalid Parameter #3"]
+
+
+def test_excludes_become_xd_and_xf_arguments() -> None:
+    command = robocopy.build_robocopy_command(
+        r"C:\a",
+        r"C:\b",
+        ("/MIR",),
+        overwrite=True,
+        exclude_dirs=("cache", ".venv"),
+        exclude_files=("*.pyc",),
+    )
+
+    assert command[3:] == ["/MIR", "/XD", "cache", "/XD", ".venv", "/XF", "*.pyc"]
+
+
+def test_task_excludes_add_to_the_global_ones_and_set_options_win(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        robocopy, "invoke_robocopy", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
+    settings = robocopy.RobocopySettings(("/R:1",), ("cache", ".venv"), ("desktop.ini",))
+    task = sync_task(
+        kind="mirror", exclude_dirs=(".venv", "node_modules"), exclude_files=("*.pyc",)
+    )
+
+    robocopy.run_task(task, None, settings)
+    robocopy.run_task(task, ("/R:9",), settings)
+
+    first, second = calls
+    assert first[0][2] == ("/MIR", "/R:1")
+    assert second[0][2] == ("/MIR", "/R:9")
+    assert first[1]["exclude_dirs"] == ("cache", ".venv", "node_modules")
+    assert first[1]["exclude_files"] == ("desktop.ini", "*.pyc")

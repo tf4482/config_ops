@@ -170,7 +170,7 @@ def _connect_only(printer: Printer, config: Config) -> int:
 # Robocopy set, with shares connected first when asked
 def _run_files(printer: Printer, config: Config, file_set: FileSet) -> int:
     unreachable = _connect(printer, config) if file_set.smb else ()
-    return run_file_set(printer, file_set, config.smb, unreachable)
+    return run_file_set(printer, file_set, config.smb, unreachable, config.robocopy)
 
 
 # Archive set, with shares connected first when asked
