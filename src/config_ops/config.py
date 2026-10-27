@@ -22,7 +22,7 @@ smb:
 
 # Settings for all Robocopy tasks (mirror, copy, move, sync); excludes of a task add to these
 robocopy:
-  # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC"]   # default for sets without their own
+  # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC", "/NJH", "/NFL", "/NDL", "/NC", "/NS", "/NP"]   # replaces the defaults, keep the /N* options
   exclude_dirs:
     - "cache"
     - "shadercache"
@@ -39,7 +39,7 @@ robocopy:
 files:
   backup:
     smb: false
-    # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC"]
+    # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC", "/NJH", "/NFL", "/NDL", "/NC", "/NS", "/NP"]
     tasks:
       - type: mirror          # mirror | mirror-file | copy | move | sync
         source: 'C:\data'
