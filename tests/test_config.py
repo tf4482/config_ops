@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 import yaml
 
-from config_ops.config import DEFAULT_CONFIG, parse_config
+from config_ops.config import DEFAULT_CONFIG, SmbMapping, parse_config
 from config_ops.configfile import ConfigError
 
 
@@ -95,6 +95,10 @@ def smb_flag_without_section(document: dict[str, Any]) -> None:
     document["files"]["backup"]["smb"] = True
 
 
+def mappings_without_smb_flag(document: dict[str, Any]) -> None:
+    document["files"]["backup"]["mappings"] = [{"share": r"\\server\main"}]
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [
@@ -106,6 +110,7 @@ def smb_flag_without_section(document: dict[str, Any]) -> None:
         (extension_without_dot, r"archive\.photos\.extensions must contain extensions"),
         (pattern_without_groups, r"dates\.screenshots\.patterns needs named groups"),
         (smb_flag_without_section, r"files\.backup\.smb requires the smb section"),
+        (mappings_without_smb_flag, r"files\.backup\.mappings requires smb: true"),
         (mirror_file_with_options, r"options and excludes are not used by mirror-file"),
         (mirror_file_with_excludes, r"options and excludes are not used by mirror-file"),
         (empty_exclude_list, r"robocopy\.exclude_dirs must be a non-empty list"),
@@ -118,6 +123,17 @@ def test_invalid_documents_are_rejected(change: Any, message: str) -> None:
 
     with pytest.raises(ConfigError, match=message):
         parse_config(document)
+
+
+def test_set_mappings_are_parsed() -> None:
+    document = config_document()
+    document["files"]["backup"]["smb"] = True
+    document["files"]["backup"]["mappings"] = [{"share": r"\\other\main", "drive": "S:"}]
+
+    config = parse_config(document)
+
+    assert config.files["backup"].mappings == (SmbMapping(r"\\other\main", "S:"),)
+    assert config.archive["photos"].mappings is None
 
 
 def test_ssh_timeout_is_capped_at_one_day() -> None:
