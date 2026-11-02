@@ -39,6 +39,8 @@ robocopy:
 files:
   backup:
     smb: false
+    # mappings:               # optional, replaces smb.mappings for this set (needs smb: true)
+    #   - share: '\\server\main'
     # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC", "/NJH", "/NFL", "/NDL", "/NC", "/NS", "/NP"]
     tasks:
       - type: mirror          # mirror | mirror-file | copy | move | sync
@@ -138,6 +140,7 @@ class FileSet:
     smb: bool
     common_options: tuple[str, ...] | None
     tasks: tuple[FileTask, ...]
+    mappings: tuple[SmbMapping, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +154,7 @@ class ArchiveSet:
     smb: bool
     extensions: frozenset[str]
     tasks: tuple[PathPair, ...]
+    mappings: tuple[SmbMapping, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +168,7 @@ class DateSet:
     change_files_in_place: bool
     overwrite: bool
     hour_adjustment: int
+    mappings: tuple[SmbMapping, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,21 +289,37 @@ def _extensions(values: Mapping[str, Any], location: str) -> frozenset[str]:
 def _parse_smb(value: Any) -> SmbSettings:
     smb = mapping(value, "smb")
     _keys(smb, {"mappings"}, {"user", "password_file"}, "smb")
-    entries = smb["mappings"]
-    if not isinstance(entries, list) or not entries:
-        raise ConfigError("smb.mappings must be a non-empty list")
-    mappings = []
-    for index, entry in enumerate(entries):
-        location = f"smb.mappings[{index}]"
-        item = mapping(entry, location)
-        _keys(item, {"share"}, {"drive"}, location)
-        drive = text(item, "drive", location) if "drive" in item else None
-        mappings.append(SmbMapping(share=text(item, "share", location), drive=drive))
+    mappings = _parse_mappings(smb["mappings"], "smb.mappings")
     return SmbSettings(
         user=text(smb, "user", "smb") if "user" in smb else None,
         password_file=text(smb, "password_file", "smb") if "password_file" in smb else None,
-        mappings=tuple(mappings),
+        mappings=mappings,
     )
+
+
+# Validate a list of SMB mappings
+def _parse_mappings(entries: Any, location: str) -> tuple[SmbMapping, ...]:
+    if not isinstance(entries, list) or not entries:
+        raise ConfigError(f"{location} must be a non-empty list")
+    mappings = []
+    for index, entry in enumerate(entries):
+        item_location = f"{location}[{index}]"
+        item = mapping(entry, item_location)
+        _keys(item, {"share"}, {"drive"}, item_location)
+        drive = text(item, "drive", item_location) if "drive" in item else None
+        mappings.append(SmbMapping(share=text(item, "share", item_location), drive=drive))
+    return tuple(mappings)
+
+
+# Set-level mappings replace the global ones; they need smb: true
+def _set_mappings(
+    values: Mapping[str, Any], location: str, *, smb: bool
+) -> tuple[SmbMapping, ...] | None:
+    if "mappings" not in values:
+        return None
+    if not smb:
+        raise ConfigError(f"{location}.mappings requires smb: true")
+    return _parse_mappings(values["mappings"], f"{location}.mappings")
 
 
 # Validate the robocopy section
@@ -314,7 +335,7 @@ def _parse_robocopy(value: Any) -> RobocopySettings:
 
 # Validate one files set
 def _parse_file_set(values: Mapping[str, Any], location: str) -> FileSet:
-    _keys(values, {"tasks"}, {"smb", "common_options"}, location)
+    _keys(values, {"tasks"}, {"smb", "common_options", "mappings"}, location)
     common = _text_list(values, "common_options", location) if "common_options" in values else None
     entries = values["tasks"]
     if not isinstance(entries, list) or not entries:
@@ -352,7 +373,8 @@ def _parse_file_set(values: Mapping[str, Any], location: str) -> FileSet:
                     exclude_files=exclude_files or (),
                 )
             )
-    return FileSet(_flag(values, "smb", location, default=False), common, tuple(tasks))
+    smb = _flag(values, "smb", location, default=False)
+    return FileSet(smb, common, tuple(tasks), _set_mappings(values, location, smb=smb))
 
 
 # One target, or a list of targets for mirror and mirror-file
@@ -366,7 +388,7 @@ def _targets(item: Mapping[str, Any], kind: str, location: str) -> tuple[str, ..
 
 # Validate one archive set
 def _parse_archive_set(values: Mapping[str, Any], location: str) -> ArchiveSet:
-    _keys(values, {"extensions", "tasks"}, {"smb"}, location)
+    _keys(values, {"extensions", "tasks"}, {"smb", "mappings"}, location)
     entries = values["tasks"]
     if not isinstance(entries, list) or not entries:
         raise ConfigError(f"{location}.tasks must be a non-empty list")
@@ -378,10 +400,12 @@ def _parse_archive_set(values: Mapping[str, Any], location: str) -> ArchiveSet:
         tasks.append(
             PathPair(text(item, "source", task_location), text(item, "target", task_location))
         )
+    smb = _flag(values, "smb", location, default=False)
     return ArchiveSet(
-        smb=_flag(values, "smb", location, default=False),
+        smb=smb,
         extensions=_extensions(values, location),
         tasks=tuple(tasks),
+        mappings=_set_mappings(values, location, smb=smb),
     )
 
 
@@ -389,6 +413,7 @@ def _parse_archive_set(values: Mapping[str, Any], location: str) -> ArchiveSet:
 def _parse_date_set(values: Mapping[str, Any], location: str) -> DateSet:
     optional = {
         "smb",
+        "mappings",
         "patterns",
         "target_folder",
         "change_files_in_place",
@@ -409,8 +434,9 @@ def _parse_date_set(values: Mapping[str, Any], location: str) -> DateSet:
         raise ConfigError(f"{location}.patterns is only used in file and folder mode")
     else:
         patterns = ()
+    smb = _flag(values, "smb", location, default=False)
     return DateSet(
-        smb=_flag(values, "smb", location, default=False),
+        smb=smb,
         mode=mode,  # pyright: ignore[reportArgumentType]
         source_folder=text(values, "source_folder", location),
         target_folder=text(values, "target_folder", location)
@@ -421,6 +447,7 @@ def _parse_date_set(values: Mapping[str, Any], location: str) -> DateSet:
         change_files_in_place=_flag(values, "change_files_in_place", location, default=True),
         overwrite=_flag(values, "overwrite", location, default=False),
         hour_adjustment=_integer(values, "hour_adjustment", location, default=0),
+        mappings=_set_mappings(values, location, smb=smb),
     )
 
 

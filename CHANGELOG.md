@@ -2,6 +2,12 @@
 
 All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Optional `mappings` per `files`, `archive`, and `dates` set; they replace the global `smb.mappings` for that set.
+
 ## [3.0.0] - 2026-10-25
 
 ### Added
