@@ -26,8 +26,8 @@ uv sync
 
 ## 🧭 Tools
 
-- **Sets**: `files`, `archive`, `dates`, and `ssh` take the name of a configured set. Sets with `smb: true` connect all shares first.
-- **Files**: `mirror-file` copies one file when the target is missing or differs (size or time), creating target folders; `overwrite: false` keeps an existing target. `mirror` and `mirror-file` accept a list of targets (`target:` with several lines); each target is a task of its own. `mirror` can delete extra target content. `sync` keeps the newer file, never purges, and rejects identical or nested folders. UNC paths need a matching `smb.mappings` share. Robocopy exit codes below `8` count as success.
+- **Sets**: `files`, `archive`, `dates`, and `ssh` take the name of a configured set. Sets with `smb: true` connect all `smb.mappings` shares first; a set with its own `mappings` list (same format) connects only those instead.
+- **Files**: `mirror-file` copies one file when the target is missing or differs (size or time), creating target folders; `overwrite: false` keeps an existing target. `mirror` and `mirror-file` accept a list of targets (`target:` with several lines); each target is a task of its own. `mirror` can delete extra target content. `sync` keeps the newer file, never purges, and rejects identical or nested folders. UNC paths need a matching share in the mappings that apply to the set. Robocopy exit codes below `8` count as success.
 - **Archive**: Replaces an existing file at the destination; the target must not be inside the source.
 - **Dates**: `file` reads the filename (source folder only), `folder` the containing folder name, `metadata` the embedded EXIF/QuickTime time, and `metadata_reverse` writes the modification time into the metadata. All but `file` scan recursively.
 - **Excludes**: `robocopy.exclude_dirs` and `robocopy.exclude_files` apply to every Robocopy task (`mirror`, `copy`, `move`, `sync`); `exclude_dirs` and `exclude_files` on a task add to them. Nothing is excluded unless you list it, `config.example.yml` shows the usual system folders. `robocopy.common_options` is the default for sets without their own `common_options`. A `common_options` list replaces the built-in defaults (`/MT:32 /W:2 /R:10 /XJ /XC /NJH /NFL /NDL /NC /NS /NP`), so keep the `/N*` options in it to keep the output short.
@@ -42,9 +42,9 @@ uv sync
 | --- | --- |
 | `smb` | optional `user`, optional `password_file`, `mappings` (`share`, optional `drive`) |
 | `robocopy` | optional `common_options`, `exclude_dirs`, `exclude_files` for all Robocopy tasks |
-| `files.<set>` | `smb`, `common_options`, `tasks` (`type`, `source`, `target`, `overwrite`, `options`, `exclude_dirs`, `exclude_files`) |
-| `archive.<set>` | `smb`, `extensions`, `tasks` (`source`, `target`) |
-| `dates.<set>` | `smb`, `mode`, `source_folder`, `extensions`, `patterns`, `target_folder`, `change_files_in_place`, `overwrite`, `hour_adjustment` |
+| `files.<set>` | `smb`, `mappings`, `common_options`, `tasks` (`type`, `source`, `target`, `overwrite`, `options`, `exclude_dirs`, `exclude_files`) |
+| `archive.<set>` | `smb`, `mappings`, `extensions`, `tasks` (`source`, `target`) |
+| `dates.<set>` | `smb`, `mappings`, `mode`, `source_folder`, `extensions`, `patterns`, `target_folder`, `change_files_in_place`, `overwrite`, `hour_adjustment` |
 | `ssh.<set>` | `user`, `host`, `port`, `timeout_seconds`, `command` |
 
 All sections are optional; see [config.example.yml](config.example.yml) for a complete file.

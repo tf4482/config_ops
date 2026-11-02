@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 
 from .archive import run_archive_set
 from .arguments import CommandLine, usage_error, usage_failure
-from .config import ArchiveSet, Config, DateSet, FileSet, SshSet
+from .config import ArchiveSet, Config, DateSet, FileSet, SmbMapping, SmbSettings, SshSet
 from .configfile import PROJECT_NAME
 from .dates import run_date_set
 from .files import FilesError, run_file_set
@@ -156,32 +157,42 @@ def _set_command[T](
     return command
 
 
+# Smb settings of a set: its own mappings replace the global ones
+def _smb_for(config: Config, mappings: tuple[SmbMapping, ...] | None) -> SmbSettings | None:
+    if config.smb is None or mappings is None:
+        return config.smb
+    return replace(config.smb, mappings=mappings)
+
+
 # Shares are connected before a set that asks for them; unreachable ones are returned
-def _connect(printer: Printer, config: Config) -> tuple[Unreachable, ...]:
-    return connect(printer, config.smb) if config.smb is not None else ()
+def _connect(printer: Printer, smb: SmbSettings | None) -> tuple[Unreachable, ...]:
+    return connect(printer, smb) if smb is not None else ()
 
 
 # The smb command: unreachable shares are no error, but they are reported at the end
 def _connect_only(printer: Printer, config: Config) -> int:
-    report_skipped(printer, [share.label for share in _connect(printer, config)])
+    report_skipped(printer, [share.label for share in _connect(printer, config.smb)])
     return 0
 
 
 # Robocopy set, with shares connected first when asked
 def _run_files(printer: Printer, config: Config, file_set: FileSet) -> int:
-    unreachable = _connect(printer, config) if file_set.smb else ()
-    return run_file_set(printer, file_set, config.smb, unreachable, config.robocopy)
+    smb = _smb_for(config, file_set.mappings)
+    unreachable = _connect(printer, smb) if file_set.smb else ()
+    return run_file_set(printer, file_set, smb, unreachable, config.robocopy)
 
 
 # Archive set, with shares connected first when asked
 def _run_archive(printer: Printer, config: Config, archive_set: ArchiveSet) -> int:
-    unreachable = _connect(printer, config) if archive_set.smb else ()
+    unreachable = (
+        _connect(printer, _smb_for(config, archive_set.mappings)) if archive_set.smb else ()
+    )
     return run_archive_set(printer, archive_set, unreachable)
 
 
 # Date set, with shares connected first when asked
 def _run_dates(printer: Printer, config: Config, date_set: DateSet) -> int:
-    unreachable = _connect(printer, config) if date_set.smb else ()
+    unreachable = _connect(printer, _smb_for(config, date_set.mappings)) if date_set.smb else ()
     return run_date_set(printer, date_set, unreachable)
 
 

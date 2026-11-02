@@ -28,6 +28,8 @@ robocopy:
 files:
   backup:
     smb: false
+    # mappings:               # optional, replaces smb.mappings for this set (needs smb: true)
+    #   - share: '\\server\main'
     # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC", "/NJH", "/NFL", "/NDL", "/NC", "/NS", "/NP"]
     tasks:
       - type: mirror          # mirror | mirror-file | copy | move | sync
