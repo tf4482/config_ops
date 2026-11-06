@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .config import FileSet, FileTask, RobocopySettings, SmbSettings
 from .filemirror import mirror_file
+from .filezip import zip_folder
 from .output import CYAN, GREEN, RED, YELLOW, Printer
 from .progress import Progress
 from .robocopy import FAILURE_EXIT_CODE, MAX_ERROR_LINES, Run, Stats, error_lines, run_task
@@ -129,10 +130,12 @@ def _paint(printer: Printer, text: str, color: str) -> str:
     return f"\033[{color}m{text}\033[0m" if printer.color else text
 
 
-# One file is mirrored by copying, everything else by Robocopy
+# One file is mirrored by copying, a zip is packed in Python, everything else by Robocopy
 def _run(task: FileTask, file_set: FileSet, robocopy: RobocopySettings) -> Run:
     if task.kind == "mirror-file":
         return mirror_file(task)
+    if task.kind == "zip":
+        return zip_folder(task, robocopy)
     return run_task(task, file_set.common_options, robocopy)
 
 

@@ -2,6 +2,12 @@
 
 All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Task type `zip` for `files` sets: zips the source folder into `<target>/<folder name>.zip`, creating the target folder; `overwrite` (default `true`) controls replacing an existing archive, and global and task `exclude_dirs` / `exclude_files` keep matching folders and files out of the zip.
+
 ## [3.1.0] - 2026-11-02
 
 ### Added
