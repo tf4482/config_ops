@@ -4,6 +4,12 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and [
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-11-06
+
+### Security
+
+- Upgraded the build dependency `setuptools` to 84.2.1 in `uv.lock` (fixes a Dependabot alert).
+
 ## [3.2.0] - 2026-11-06
 
 ### Added
