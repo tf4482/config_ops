@@ -32,10 +32,10 @@ files:
     #   - share: '\\server\main'
     # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC", "/NJH", "/NFL", "/NDL", "/NC", "/NS", "/NP"]
     tasks:
-      - type: mirror          # mirror | mirror-file | copy | move | sync
+      - type: mirror          # mirror | mirror-file | copy | move | sync | zip
         source: 'C:\data'
         target: 'D:\backup\data'
-        exclude_dirs: [".venv", "node_modules"]   # optional, also for copy, move, sync
+        exclude_dirs: [".venv", "node_modules"]   # optional, also for copy, move, sync, zip
         exclude_files: ["*.pyc"]                  # optional
       - type: copy
         source: 'C:\documents'
@@ -46,6 +46,11 @@ files:
         target:               # one path, or a list for mirror and mirror-file
           - 'D:\backup\app.ini'
           - 'E:\backup\app.ini'
+      - type: zip             # zips the source folder into <target>\<source folder name>.zip
+        source: 'C:\settings\.ssh'
+        target: 'D:\backup\ssh'
+        overwrite: false      # optional, default true
+        exclude_files: ["known_hosts"]            # optional, skipped in the zip
 
 # Media archive sets: config_ops archive <set>
 archive:

@@ -147,7 +147,7 @@ def test_several_targets_become_one_task_each() -> None:
     config = parse_config(config_document())
 
     tasks = config.files["backup"].tasks
-    assert [(task.kind, task.target) for task in tasks[2:]] == [
+    assert [(task.kind, task.target) for task in tasks[2:4]] == [
         ("mirror-file", r"D:\backup\app.ini"),
         ("mirror-file", r"E:\backup\app.ini"),
     ]
