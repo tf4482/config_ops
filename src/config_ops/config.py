@@ -43,10 +43,10 @@ files:
     #   - share: '\\server\main'
     # common_options: ["/MT:32", "/W:2", "/R:10", "/XJ", "/XC", "/NJH", "/NFL", "/NDL", "/NC", "/NS", "/NP"]
     tasks:
-      - type: mirror          # mirror | mirror-file | copy | move | sync
+      - type: mirror          # mirror | mirror-file | copy | move | sync | zip
         source: 'C:\data'
         target: 'D:\backup\data'
-        exclude_dirs: [".venv", "node_modules"]   # optional, also for copy, move, sync
+        exclude_dirs: [".venv", "node_modules"]   # optional, also for copy, move, sync, zip
         exclude_files: ["*.pyc"]                  # optional
       - type: copy
         source: 'C:\documents'
@@ -57,6 +57,11 @@ files:
         target:               # one path, or a list for mirror and mirror-file
           - 'D:\backup\app.ini'
           - 'E:\backup\app.ini'
+      - type: zip             # zips the source folder into <target>\<source folder name>.zip
+        source: 'C:\settings\.ssh'
+        target: 'D:\backup\ssh'
+        overwrite: false      # optional, default true
+        exclude_files: ["known_hosts"]            # optional, skipped in the zip
 
 # Media archive sets: config_ops archive <set>
 archive:
@@ -91,10 +96,10 @@ ssh:
     command: "ls"
 """
 
-FileKind = Literal["mirror", "mirror-file", "copy", "move", "sync"]
+FileKind = Literal["mirror", "mirror-file", "copy", "move", "sync", "zip"]
 DateMode = Literal["file", "folder", "metadata", "metadata_reverse"]
 
-FILE_KINDS: tuple[FileKind, ...] = ("mirror", "mirror-file", "copy", "move", "sync")
+FILE_KINDS: tuple[FileKind, ...] = ("mirror", "mirror-file", "copy", "move", "sync", "zip")
 MULTI_TARGET_KINDS = ("mirror", "mirror-file")
 DATE_MODES: tuple[DateMode, ...] = ("file", "folder", "metadata", "metadata_reverse")
 TIMESTAMP_GROUPS = {"month", "day"}
@@ -358,6 +363,8 @@ def _parse_file_set(values: Mapping[str, Any], location: str) -> FileSet:
         exclude_files = _optional_list(item, "exclude_files", task_location)
         if kind == "mirror-file" and (options or exclude_dirs or exclude_files):
             raise ConfigError(f"{task_location} options and excludes are not used by mirror-file")
+        if kind == "zip" and options:
+            raise ConfigError(f"{task_location} options are not used by zip")
         source = text(item, "source", task_location)
         overwrite = _flag(item, "overwrite", task_location, default=True)
         # One task per target, run and reported on its own
